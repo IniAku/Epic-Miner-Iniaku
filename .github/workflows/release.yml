@@ -64,8 +64,17 @@ jobs:
         shell: bash
         run: |
           export RUSTFLAGS="-L native=$OCL_LIB_DIR"
-          cargo build --release --no-default-features --features cpu,cuckoo_miner/no-plugin-build
-          cargo build --release -p ocl_cuckatoo
+          # Error compiler juga dikirim sbg anotasi (bisa dibaca tanpa login, log job tidak).
+          build() {
+            if ! "$@" > build.log 2>&1; then
+              cat build.log
+              grep -E "^(error|  --> |warning: unused)|error:|cannot find|LINK : |fatal" build.log | head -30 | sed 's/^/::error::/'
+              exit 1
+            fi
+            cat build.log
+          }
+          build cargo build --release --no-default-features --features cpu,cuckoo_miner/no-plugin-build
+          build cargo build --release -p ocl_cuckatoo
       - name: Package
         shell: bash
         run: iniaku/package-windows.sh "${{ steps.v.outputs.version }}"

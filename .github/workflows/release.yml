@@ -106,6 +106,7 @@ jobs:
         with:
           files: dist/*
           fail_on_unmatched_files: true
+          prerelease: ${{ contains(github.ref_name, 'beta') }}
           body: |
             epic-miner — epic.iniaku.my.id edition (Cuckatoo19 / Cuckoo for Epic Cash).
             Mines only to the epic.iniaku.my.id pool (region auto / id / us / au).

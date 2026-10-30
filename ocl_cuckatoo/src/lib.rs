@@ -6,27 +6,60 @@ extern crate libc;
 extern crate ocl;
 
 use blake2_rfc::blake2b::blake2b;
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{BigEndian, ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 use libc::*;
 use plugin::*;
+use std::collections::VecDeque;
 use std::io::Cursor;
 use std::io::Error;
 use std::mem;
-use std::ptr;
 use std::time::{Duration, SystemTime};
 
+pub use self::batch::BatchTrimmer;
 pub use self::finder::Graph;
 pub use self::trimmer::Trimmer;
 
+mod batch;
 mod finder;
 mod trimmer;
 
 #[repr(C)]
 struct Solver {
 	edge_bits: u8,
-	trimmer: Trimmer,
+	/// C31 (dan C19 tanpa batch): trimmer lama, satu graf per panggilan.
+	trimmer: Option<Trimmer>,
+	/// C19: banyak graf per panggilan (lihat batch.rs).
+	batch: Option<BatchTrimmer>,
+	/// Solusi batch yg belum dikembalikan (SolverSolutions muat MAX_SOLS per panggilan):
+	/// (nonce, proof), berlaku hanya utk header yg sama (`queue_key` = header tanpa nonce).
+	queue: VecDeque<(u64, Vec<u64>)>,
+	queue_key: Vec<u8>,
+	last_graph_ns: u64,
 	graph: Option<Graph>,
 	mutate_nonce: bool,
+}
+
+/// Graf per batch (env OCL_BATCH, default 256) & ronde trimming C19 (env OCL_TRIMS, default 96).
+fn env_u32(name: &str, default: u32, min: u32, max: u32) -> u32 {
+	std::env::var(name)
+		.ok()
+		.and_then(|v| v.trim().parse::<u32>().ok())
+		.map(|v| v.max(min).min(max))
+		.unwrap_or(default)
+}
+
+fn ocl_batch() -> u32 {
+	env_u32("OCL_BATCH", 256, 1, 4096)
+}
+
+fn ocl_trims() -> u32 {
+	env_u32("OCL_TRIMS", 96, 8, 512)
+}
+
+/// Dibaca miner (simbol opsional): > 1 = run_solver memproses banyak graf per panggilan.
+#[no_mangle]
+pub extern "C" fn batch_size() -> uint32_t {
+	ocl_batch()
 }
 
 #[no_mangle]
@@ -43,10 +76,21 @@ pub unsafe extern "C" fn create_solver_ctx(params: *mut SolverParams) -> *mut So
 	if edge_bits != 19 && (edge_bits < 31 || edge_bits > 64) {
 		edge_bits = 19;
 	}
-	let trimmer = Trimmer::build(platform, device_id, edge_bits).expect("can't build trimmer");
+	let (trimmer, batch) = if edge_bits == 19 {
+		let bt = BatchTrimmer::build(platform, device_id, edge_bits, ocl_batch() as usize, ocl_trims())
+			.expect("can't build batch trimmer");
+		(None, Some(bt))
+	} else {
+		let t = Trimmer::build(platform, device_id, edge_bits).expect("can't build trimmer");
+		(Some(t), None)
+	};
 	let solver = Solver {
 		edge_bits,
-		trimmer: trimmer,
+		trimmer,
+		batch,
+		queue: VecDeque::new(),
+		queue_key: vec![],
+		last_graph_ns: 0,
 		graph: None,
 		mutate_nonce: (*params).mutate_nonce,
 	};
@@ -78,49 +122,121 @@ pub unsafe extern "C" fn run_solver(
 	header_ptr: *const c_uchar,
 	header_length: uint32_t,
 	nonce: uint64_t,
-	_range: uint32_t,
+	range: uint32_t,
 	solutions: *mut SolverSolutions,
 	stats: *mut SolverStats,
 ) -> uint32_t {
 	let start = SystemTime::now();
 	let solver_ptr = mem::transmute::<*mut SolverCtx, *mut Solver>(ctx);
-	let solver = &*solver_ptr;
-	let mut header = Vec::with_capacity(header_length as usize);
-	let r_ptr = header.as_mut_ptr();
-	ptr::copy_nonoverlapping(header_ptr, r_ptr, header_length as usize);
-	header.set_len(header_length as usize);
-	let n = nonce as u32;
-	let k = match set_header_nonce(&header, Some(n), solver.mutate_nonce) {
-		Err(_e) => {
+	let solver = &mut *solver_ptr;
+	let header = std::slice::from_raw_parts(header_ptr, header_length as usize).to_vec();
+
+	let (found, device_id, device_name, graph_ns) = if solver.batch.is_some() {
+		// Batch: `nonce` = offset byte nonce (u64 BE) di header, `range` = jumlah graf.
+		if range < 2 || nonce as usize + 8 > header.len() {
 			return 2;
 		}
-		Ok(v) => v,
+		let off = nonce as usize;
+		let mut key = header.clone();
+		key[off..off + 8].copy_from_slice(&[0u8; 8]);
+		if solver.queue.is_empty() || solver.queue_key != key {
+			solver.queue.clear();
+			solver.queue_key = key;
+			let bt = solver.batch.as_ref().unwrap();
+			let base = BigEndian::read_u64(&header[off..off + 8]);
+			let mut h = header.clone();
+			let mut keys = Vec::with_capacity(bt.batch);
+			for i in 0..bt.batch {
+				BigEndian::write_u64(&mut h[off..off + 8], base.wrapping_add(i as u64));
+				match create_siphash_keys(&h) {
+					Ok(k) => keys.push(k),
+					Err(_) => return 2,
+				}
+			}
+			let res = match bt.run(&keys) {
+				Ok(r) => r,
+				Err(_) => return 2,
+			};
+			// Cari cycle (CPU, ~0.2 ms/graf) paralel di beberapa core supaya tidak menahan GPU.
+			let nthreads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8).max(1);
+			let chunk = (bt.batch + nthreads - 1) / nthreads;
+			let res = &res;
+			let found: Vec<(u64, Vec<u64>)> = std::thread::scope(|sc| {
+				let handles: Vec<_> = (0..bt.batch)
+					.step_by(chunk)
+					.map(|from| {
+						let to = std::cmp::min(from + chunk, bt.batch);
+						sc.spawn(move || {
+							let mut out = vec![];
+							for g in from..to {
+								let mut a = res[g * batch::AUX_STRIDE..(g + 1) * batch::AUX_STRIDE].to_vec();
+								a[1] = std::cmp::min(a[1] as usize, batch::MAX_EDGES) as u32;
+								if a[1] == 0 {
+									continue;
+								}
+								if let Ok(sols) = Graph::search(&a) {
+									for sol in sols {
+										if sol.nonces.len() == PROOFSIZE {
+											let mut p = sol.nonces.clone();
+											p.sort();
+											out.push((base.wrapping_add(g as u64), p));
+										}
+									}
+								}
+							}
+							out
+						})
+					})
+					.collect();
+				handles.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect()
+			});
+			solver.queue.extend(found);
+			solver.last_graph_ns =
+				duration_to_u64(SystemTime::now().duration_since(start).unwrap()) / bt.batch as u64;
+		}
+		let mut found = vec![];
+		while found.len() < MAX_SOLS {
+			match solver.queue.pop_front() {
+				Some(s) => found.push(s),
+				None => break,
+			}
+		}
+		let bt = solver.batch.as_ref().unwrap();
+		(found, bt.device_id, bt.device_name.clone(), solver.last_graph_ns)
+	} else {
+		let t = match solver.trimmer.as_ref() {
+			Some(t) => t,
+			None => return 2,
+		};
+		let k = match set_header_nonce(&header, Some(nonce as u32), solver.mutate_nonce) {
+			Err(_e) => return 2,
+			Ok(v) => v,
+		};
+		let res = t.run(&k).unwrap();
+		let sols = Graph::search(&res).unwrap();
+		// nonce 0 = miner memakai nonce header-nya sendiri.
+		let found = sols.into_iter().take(MAX_SOLS).map(|s| (nonce, s.nonces)).collect();
+		let ns = duration_to_u64(SystemTime::now().duration_since(start).unwrap());
+		(found, t.device_id, t.device_name.clone(), ns)
 	};
-	let res = solver.trimmer.run(&k).unwrap();
 
-	let sols = Graph::search(&res).unwrap();
 	let end = SystemTime::now();
-	let elapsed = end.duration_since(start).unwrap();
-	let mut i = 0;
 	(*solutions).edge_bits = solver.edge_bits as u32;
-	(*solutions).num_sols = sols.len() as u32;
-	for sol in sols {
-		(*solutions).sols[i].nonce = nonce;
-		(*solutions).sols[i]
-			.proof
-			.copy_from_slice(&sol.nonces[..sol.nonces.len()]);
-		i += 1;
+	(*solutions).num_sols = found.len() as u32;
+	for (i, (n, proof)) in found.iter().enumerate() {
+		(*solutions).sols[i].nonce = *n;
+		(*solutions).sols[i].proof.copy_from_slice(&proof[..PROOFSIZE]);
 	}
-	(*stats).edge_bits = solver.edge_bits as u32;
-	(*stats).device_id = solver.trimmer.device_id as u32;
-	let name_bytes = solver.trimmer.device_name.as_bytes();
 	let stats_ref = &mut *stats;
+	stats_ref.edge_bits = solver.edge_bits as u32;
+	stats_ref.device_id = device_id as u32;
+	let name_bytes = device_name.as_bytes();
 	let n = std::cmp::min(stats_ref.device_name.len(), name_bytes.len());
-	stats_ref.device_name[..n].copy_from_slice(&solver.trimmer.device_name.as_bytes()[..n]);
-	(*stats).last_solution_time = duration_to_u64(elapsed);
-	(*stats).last_start_time =
-		duration_to_u64(start.duration_since(SystemTime::UNIX_EPOCH).unwrap());
-	(*stats).last_end_time = duration_to_u64(end.duration_since(SystemTime::UNIX_EPOCH).unwrap());
+	stats_ref.device_name[..n].copy_from_slice(&name_bytes[..n]);
+	// Per graf (batch: waktu batch / jumlah graf) — miner menghitung gps = 1 / waktu ini.
+	stats_ref.last_solution_time = graph_ns;
+	stats_ref.last_start_time = duration_to_u64(start.duration_since(SystemTime::UNIX_EPOCH).unwrap());
+	stats_ref.last_end_time = duration_to_u64(end.duration_since(SystemTime::UNIX_EPOCH).unwrap());
 	0
 }
 
@@ -175,6 +291,34 @@ mod tests {
 			})
 			.collect();
 		assert!(found.iter().any(|n| n[..] == expected[..]), "C19 solution not found: {:x?}", found);
+	}
+
+	// Batch: graf referensi di posisi 1 & 3 harus menghasilkan solusi yg sama dgn lean19x1.
+	#[test]
+	fn test_batch_c19() {
+		let k74 = [0xd23109bd4dac0bdf, 0x76fbe03c31ad8133, 0xd17f301a7a865e22, 0xbaf57c804957a342];
+		let k80 = [0x5a8792dce8508408, 0x0b253fd43e8d69ed, 0x821447be88274415, 0x1f209d183347b4f6];
+		let other = [1u64, 2, 3, 4];
+		let bt = BatchTrimmer::build(None, None, 19, 4, ocl_trims()).expect("can't build batch trimmer");
+		let res = bt.run(&[other, k74, other, k80]).unwrap();
+		let mut max_left = 0;
+		for (g, first) in [(1usize, 0x19ceu64), (3, 0x1bc1)].iter() {
+			let a = &res[g * batch::AUX_STRIDE..(g + 1) * batch::AUX_STRIDE];
+			max_left = std::cmp::max(max_left, a[1]);
+			let sols = Graph::search(a).unwrap();
+			let mut found: Vec<Vec<u64>> = sols.iter().map(|s| { let mut n = s.nonces.clone(); n.sort(); n }).collect();
+			found.retain(|n| n[0] == *first);
+			assert_eq!(found.len(), 1, "graph {} solution missing", g);
+		}
+		println!("trims {} edges left max {}", ocl_trims(), max_left);
+		let t0 = std::time::Instant::now();
+		for _ in 0..50 {
+			for g in 0..4 {
+				let a = &res[g * batch::AUX_STRIDE..(g + 1) * batch::AUX_STRIDE];
+				let _ = Graph::search(a);
+			}
+		}
+		println!("cpu search per graph: {:?}", t0.elapsed() / 200);
 	}
 
 	#[test]

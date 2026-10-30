@@ -135,11 +135,19 @@ impl CuckooMiner {
 			let header = util::get_next_header_data(&header_pre, &header_post);
 			let nonce = header.0;
 			//let sec_scaling = header.2;
+			// Plugin batch (ocl_cuckatoo C19): nonce = offset byte nonce di header, range = jumlah
+			// graf; plugin memakai nonce+0..range & mengembalikan nonce tiap solusi.
+			let batch = solver.lib.batch_size;
+			let (nonce_arg, range) = if batch > 1 {
+				((header_pre.len() / 2) as u64, batch)
+			} else {
+				(0, 1)
+			};
 			solver.lib.run_solver(
 				ctx,
 				header.1,
-				0,
-				1,
+				nonce_arg,
+				range,
 				&mut solver.solutions,
 				&mut solver.stats,
 			);
@@ -170,7 +178,10 @@ impl CuckooMiner {
 						})
 						.collect();
 					for ss in filtered_sols.iter_mut() {
-						ss.nonce = nonce;
+						// Plugin batch sudah mengisi nonce-nya sendiri; plugin lama mengembalikan 0.
+						if ss.nonce == 0 {
+							ss.nonce = nonce;
+						}
 						ss.id = job_id as u64;
 					}
 					solver.solutions.num_sols = filtered_sols.len() as u32;

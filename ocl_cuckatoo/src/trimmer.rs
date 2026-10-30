@@ -153,7 +153,7 @@ impl Trimmer {
 	}
 }
 
-fn find_platform(selector: Option<&str>) -> Option<Platform> {
+pub fn find_platform(selector: Option<&str>) -> Option<Platform> {
 	match selector {
 		None => Some(Platform::default()),
 		Some(sel) => Platform::list().into_iter().find(|p| {
@@ -166,7 +166,7 @@ fn find_platform(selector: Option<&str>) -> Option<Platform> {
 	}
 }
 
-fn find_device(platform: &Platform, selector: Option<usize>) -> ocl::Result<Device> {
+pub fn find_device(platform: &Platform, selector: Option<usize>) -> ocl::Result<Device> {
 	match selector {
 		None => Device::first(platform),
 		Some(index) => Device::by_idx_wrap(platform, index),

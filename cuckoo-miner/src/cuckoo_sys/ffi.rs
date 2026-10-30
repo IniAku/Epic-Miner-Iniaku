@@ -32,6 +32,11 @@ pub struct PluginLibrary {
 	///The full file path to the plugin loaded by this instance
 	pub lib_full_path: String,
 
+	/// Graf per panggilan run_solver (simbol opsional `batch_size`, mis. ocl_cuckatoo C19).
+	/// > 1: miner mengirim offset nonce di header sbg `nonce` & jumlah graf sbg `range`;
+	/// plugin mengisi sols[i].nonce dgn nonce yg dipakai. 1 = plugin lama (satu graf).
+	pub batch_size: u32,
+
 	loaded_library: Arc<Mutex<libloading::Library>>,
 	cuckoo_create_solver_ctx: Arc<Mutex<CuckooCreateSolverCtx>>,
 	cuckoo_destroy_solver_ctx: Arc<Mutex<CuckooDestroySolverCtx>>,
@@ -63,8 +68,13 @@ impl PluginLibrary {
 		path: &str,
 	) -> Result<PluginLibrary, MinerError> {
 		unsafe {
+			let batch_size = match loaded_library.get::<unsafe extern "C" fn() -> u32>(b"batch_size\0") {
+				Ok(f) => std::cmp::max(1, f()),
+				Err(_) => 1,
+			};
 			let ret_val = PluginLibrary {
 				lib_full_path: String::from(path),
+				batch_size,
 
 				cuckoo_create_solver_ctx: {
 					let cuckoo_create_solver_ctx: libloading::Symbol<

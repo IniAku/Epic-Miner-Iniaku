@@ -33,6 +33,12 @@ Benchmark / GPU test
 Mines every job without waiting for a Cuckoo turn and prints gps and found shares.
 Nothing is submitted to the pool. Stop with Ctrl+C.
 
+OpenCL tuning (environment variables, optional):
+  OCL_BATCH  graphs per GPU batch (default 256; try 512 or 1024 on big GPUs)
+  OCL_TRIMS  trimming rounds (default 96; fewer = more CPU work)
+  Windows:  set OCL_BATCH=512  then  epic-miner.exe --bench
+  Linux:    OCL_BATCH=512 ./epic-miner --bench
+
 "Waiting for Cuckoo turn"
 -------------------------
 Epic rotates the algorithm every block (ProgPoW / RandomX / Cuckoo). Cuckoo gets about

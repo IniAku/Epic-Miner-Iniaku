@@ -27,6 +27,12 @@ Variants
 Several GPUs: copy the [[mining.miner_plugin_config]] block once per GPU and set
 "device" to 0, 1, 2, ...
 
+Benchmark / GPU test
+--------------------
+  ./epic-miner --bench      (Windows: epic-miner.exe --bench)
+Mines every job without waiting for a Cuckoo turn and prints gps and found shares.
+Nothing is submitted to the pool. Stop with Ctrl+C.
+
 "Waiting for Cuckoo turn"
 -------------------------
 Epic rotates the algorithm every block (ProgPoW / RandomX / Cuckoo). Cuckoo gets about

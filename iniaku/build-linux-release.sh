@@ -21,7 +21,14 @@ docker run --rm --cpus=4 -u "$uid:$gid" -e HOME=/tmp/home \
 		cargo build --release -p ocl_cuckatoo
 		cargo build --release -p cuckoo_miner --features cuckoo_miner/build-cuda-plugins
 	'
+# Lewat sudo: kemas sbg user asli. Tanpa sudo (mis. CI) langsung; setpriv tidak selalu ada.
+asuser() {
+	if [ "$(id -u)" = 0 ] && [ "$uid" != 0 ]; then
+		setpriv --reuid="$uid" --regid="$gid" --clear-groups "$@"
+	else
+		"$@"
+	fi
+}
 for v in opencl cuda; do
-	setpriv --reuid="$uid" --regid="$gid" --clear-groups env EPIC_TARGET_DIR="$root/target-u2004" \
-		"$root/iniaku/package-linux.sh" "$v" "$version"
+	asuser env EPIC_TARGET_DIR="$root/target-u2004" "$root/iniaku/package-linux.sh" "$v" "$version"
 done

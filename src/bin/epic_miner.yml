@@ -14,6 +14,9 @@ args:
       short: r
       long: region
       takes_value: true
+  - bench:
+      help: "Benchmark: mine every job (no waiting for a Cuckoo turn), report gps and found shares; nothing is submitted to the pool"
+      long: bench
 subcommands:
   - new_config:
       about: Create a new copy of the epic-miner.toml in the current folder.

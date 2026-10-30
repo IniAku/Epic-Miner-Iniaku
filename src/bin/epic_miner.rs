@@ -133,7 +133,7 @@ mod with_tui {
 	}
 }
 
-fn start_miner<T>(mut miner: T, algorithm: Algorithm, mining_config: &MinerConfig)
+fn start_miner<T>(mut miner: T, algorithm: Algorithm, mining_config: &MinerConfig, bench: bool)
 where
 	T: Miner + 'static,
 {
@@ -163,6 +163,7 @@ where
 		mining_config.stratum_server_password.clone(),
 		mc.tx.clone(),
 		stats.clone(),
+		bench,
 	)
 	.unwrap_or_else(|e| {
 		panic!("Error loading stratum client controller: {:?}", e);
@@ -264,6 +265,7 @@ fn main() {
 		.unwrap();
 
 	let mut mining_config = global_config.members.as_mut().unwrap().mining.clone();
+	let bench = args.is_present("bench");
 	if let Some(r) = args.value_of("region") {
 		mining_config.region = Some(r.to_string());
 	}
@@ -305,23 +307,27 @@ fn main() {
 			randomx::RxMiner::new(&mining_config),
 			mining_config.algorithm.clone().unwrap(),
 			&mining_config,
+			bench,
 		), //randomx::RxMiner::new(&mining_config),
 		Algorithm::Cuckoo => start_miner(
 			cuckoo::CuckooMiner::new(&mining_config),
 			mining_config.algorithm.clone().unwrap(),
 			&mining_config,
+			bench,
 		),
 		#[cfg(feature = "opencl")]
 		Algorithm::ProgPow => start_miner(
 			progpow::PpMiner::new(&mining_config),
 			mining_config.algorithm.clone().unwrap(),
 			&mining_config,
+			bench,
 		),
 		#[cfg(feature = "cuda")]
 		Algorithm::ProgPow => start_miner(
 			progpow::PpMiner::new(&mining_config),
 			mining_config.algorithm.clone().unwrap(),
 			&mining_config,
+			bench,
 		),
 		#[allow(unreachable_patterns)]
 		_ => panic!("This algorithm is not supported in this build!"),

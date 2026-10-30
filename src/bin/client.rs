@@ -170,6 +170,9 @@ pub struct Controller {
 	/// Server pool (lihat pools.rs), [0] = utama; sisanya cadangan failover.
 	servers: Vec<String>,
 	server_idx: usize,
+	/// --bench: tambang setiap job tanpa menunggu giliran Cuckoo, solusi TIDAK dikirim ke pool.
+	bench: bool,
+	bench_found: u64,
 	server_url: String,
 	server_login: Option<String>,
 	server_password: Option<String>,
@@ -197,6 +200,7 @@ impl Controller {
 		server_password: Option<String>,
 		miner_tx: mpsc::Sender<types::MinerMessage>,
 		stats: Arc<RwLock<stats::Stats>>,
+		bench: bool,
 	) -> Result<Controller, Error> {
 		let (tx, rx) = mpsc::channel::<types::ClientMessage>();
 		if servers.is_empty() {
@@ -208,6 +212,8 @@ impl Controller {
 			server_url: servers[0].clone(),
 			servers,
 			server_idx: 0,
+			bench,
+			bench_found: 0,
 			server_login: server_login,
 			server_password: server_password,
 			// Pool iniaku hanya lewat TLS (port 3334).
@@ -393,6 +399,14 @@ impl Controller {
 	}
 
 	fn send_message_submit(&mut self, height: u64, solution: Solution) -> Result<(), Error> {
+		if self.bench {
+			self.bench_found += 1;
+			warn!(
+				LOGGER,
+				"[bench] share #{} found at height {} (not submitted)", self.bench_found, height
+			);
+			return Ok(());
+		}
 		let params_in = types::SubmitParams {
 			height: height,
 			job_id: solution.get_id(),
@@ -461,7 +475,8 @@ impl Controller {
 			"Last Message Received: Start Job for Height: {}, Share Difficulty: {}",
 			job.height, job_diff
 		);
-		stats.client_stats.algorithm_needed = algo_needed;
+		// --bench: selalu tampilkan gps (bukan "Waiting for Cuckoo turn").
+		stats.client_stats.algorithm_needed = if self.bench { String::new() } else { algo_needed };
 		stats.client_stats.current_network_difficulty = current_network_diff;
 		self.miner_tx.send(miner_message).map_err(|e| e.into())
 	}
@@ -492,7 +507,7 @@ impl Controller {
 						_ => "".to_string(),
 					};
 
-					if self.parse_algorithm() == algo_needed {
+					if self.bench || self.parse_algorithm() == algo_needed {
 						self.send_miner_job(job)
 					} else {
 						debug!(
@@ -566,7 +581,7 @@ impl Controller {
 						_ => "".to_string(),
 					};
 
-					if self.parse_algorithm() == algo_needed {
+					if self.bench || self.parse_algorithm() == algo_needed {
 						self.send_miner_job(job)
 					} else {
 						debug!(

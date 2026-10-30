@@ -12,7 +12,7 @@ if(WIN32)
 else()
   set (FLAGS "-Wno-format -Wno-deprecated-declarations -D_POSIX_C_SOURCE=200112L ${OPT} ${DOPT} -I. ${CPPFLAGS} -pthread")
 endif()
-set (GPP_FLAGS "-march=x86-64-v2 -mtune=generic -m64 ${FLAGS}") # dulu -march=native: binary rilis crash di CPU lain; v2 = SSE4.2 (2009+)
+set (GPP_FLAGS "-march=nehalem -mtune=generic -m64 ${FLAGS}") # dulu -march=native: binary rilis crash di CPU lain; nehalem = x86-64-v2 (SSE4.2, 2009+), dikenal GCC lama
 set (CFLAGS "-Wno-format -fomit-frame-pointer ${OPT}")
 set (GCC_FLAGS "-m64 -std=gnu11 ${CFLAGS}")
 
@@ -105,7 +105,8 @@ set (AT_MEAN_CUDA_SRC
 			${BLAKE_2B} )
 
 if (NOT SKIP_CUCKATOO_GPU)
-  build_cuda_target("${AT_MEAN_CUDA_SRC}" cuckatoo_mean_cuda_19 "-DNEPS_A=512 -DNEPS_B=384 -DIDXSHIFT=6 -DEDGEBITS=19")
+  # mean_cuda_19 dimatikan: BUCKBITS=12 menyisakan bitmap 16 byte utk C19 (static_assert TRIM0_TPB); pakai lean_cuda_19
+  #build_cuda_target("${AT_MEAN_CUDA_SRC}" cuckatoo_mean_cuda_19 "-DNEPS_A=512 -DNEPS_B=384 -DIDXSHIFT=6 -DEDGEBITS=19")
   build_cuda_target("${AT_MEAN_CUDA_SRC}" cuckatoo_mean_cuda_gtx_31 "-DNRB1=26 -DNEPS_A=135 -DNEPS_B=88 -DPART_BITS=1 -DEDGEBITS=31")
   build_cuda_target("${AT_MEAN_CUDA_SRC}" cuckatoo_mean_cuda_rtx_31 "-DNRB1=26 -DNEPS_A=133 -DNEPS_B=85 -DPART_BITS=0 -DEDGEBITS=31")
 endif()

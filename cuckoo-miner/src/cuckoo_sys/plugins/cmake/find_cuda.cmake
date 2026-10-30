@@ -45,7 +45,11 @@ if(CUDA_FOUND)
 	
 	# Find a complete list for CUDA compute capabilities at http://developer.nvidia.com/cuda-gpus
 
-        if(NOT ${CUDA_VERSION_STRING} VERSION_LESS "10.0")
+        if(NOT ${CUDA_VERSION_STRING} VERSION_LESS "12.0")
+                # CUDA 12 membuang Kepler (3.x); 5.0 (GTX 750/900) s/d 9.0 (H100), PTX 9.0 utk GPU lebih baru (JIT)
+                set(__cuda_arch_bin "5.0 5.2 6.0 6.1 7.0 7.5 8.0 8.6 8.9 9.0")
+                set(__cuda_arch_ptx "9.0")
+        elseif(NOT ${CUDA_VERSION_STRING} VERSION_LESS "10.0")
                 set(__cuda_arch_bin "3.5 3.7 5.0 5.2 6.0 6.1 7.0 7.2 7.5")
         elseif(NOT ${CUDA_VERSION_STRING} VERSION_LESS "9.0")
                 set(__cuda_arch_bin "3.5 3.7 5.0 5.2 6.0 6.1 7.0")
@@ -57,7 +61,7 @@ if(CUDA_FOUND)
 
         set(CUDA_ARCH_BIN ${__cuda_arch_bin} CACHE STRING "Specify 'real' GPU architectures to build binaries for, BIN(PTX) format is supported")
 
-	set(CUDA_ARCH_PTX "" CACHE STRING "Specify 'virtual' PTX arch to build PTX intermediate code for. Example: 1.0 1.2 or 10 12")
+	set(CUDA_ARCH_PTX "${__cuda_arch_ptx}" CACHE STRING "Specify 'virtual' PTX arch to build PTX intermediate code for. Example: 1.0 1.2 or 10 12")
 	#set(CUDA_ARCH_PTX "1.1 1.2" CACHE STRING "Specify 'virtual' PTX arch to build PTX intermediate code for. Example: 1.0 1.2 or 10 12")
 
 	# Guess this macros will be included in cmake distributive

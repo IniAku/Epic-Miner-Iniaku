@@ -6,3 +6,4 @@ target
 *.iml
 grin-miner.log
 build/dist/
+target-u2004/

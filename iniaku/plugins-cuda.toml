@@ -1,10 +1,10 @@
 # NVIDIA GPU via CUDA. One block per GPU; device = CUDA device index.
 [[mining.miner_plugin_config]]
-plugin_name = "cuckatoo_mean_cuda_19"
+plugin_name = "cuckatoo_lean_cuda_19"
 [mining.miner_plugin_config.parameters]
 device = 0
 
 #[[mining.miner_plugin_config]]
-#plugin_name = "cuckatoo_mean_cuda_19"
+#plugin_name = "cuckatoo_lean_cuda_19"
 #[mining.miner_plugin_config.parameters]
 #device = 1

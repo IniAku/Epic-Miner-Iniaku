@@ -22,6 +22,7 @@ extern crate cuckoo_miner_cuda as cuckoo;
 extern crate progpow_miner_cuda as progpow;
 #[cfg(feature = "opencl")]
 extern crate progpow_miner_opencl as progpow;
+#[cfg(feature = "rx")]
 extern crate randomx_miner as randomx;
 
 extern crate epic_miner_config as config;
@@ -299,6 +300,7 @@ fn main() {
 	debug!(LOGGER, "Starting solvers");
 
 	match mining_config.algorithm.clone().unwrap() {
+		#[cfg(feature = "rx")]
 		Algorithm::RandomX => start_miner(
 			randomx::RxMiner::new(&mining_config),
 			mining_config.algorithm.clone().unwrap(),

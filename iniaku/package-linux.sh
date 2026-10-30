@@ -6,7 +6,7 @@ set -eu
 variant=${1:?usage: package-linux.sh <opencl|cuda> <version>}
 version=${2:?usage: package-linux.sh <opencl|cuda> <version>}
 root=$(cd "$(dirname "$0")/.." && pwd)
-rel="$root/target/release"
+rel="${EPIC_TARGET_DIR:-$root/target}/release"
 name="epic-miner-iniaku-$version-linux-x64-$variant"
 out="$root/dist/$name"
 
@@ -14,8 +14,11 @@ rm -rf "$out"
 mkdir -p "$out/plugins"
 
 cp "$rel/epic-miner" "$out/"
-# epic-miner di-link ke librandomx.so (rpath $ORIGIN) walau build ini hanya Cuckoo.
-cp "$(find "$rel/build" -name librandomx.so | head -1)" "$out/"
+# Build iniaku (--no-default-features --features cpu) tanpa RandomX; build default butuh
+# librandomx.so di sebelah binary (rpath $ORIGIN).
+if ldd "$rel/epic-miner" | grep -q librandomx; then
+	cp "$(find "$rel/build" -name librandomx.so | head -1)" "$out/"
+fi
 for p in cuckatoo_mean_cpu_compat_19 cuckatoo_mean_cpu_avx2_19 cuckatoo_lean_cpu_compat_19; do
 	cp "$rel/plugins/$p.cuckooplugin" "$out/plugins/"
 done
@@ -25,7 +28,7 @@ opencl)
 	cp "$rel/libocl_cuckatoo.so" "$out/plugins/ocl_cuckatoo.cuckooplugin"
 	;;
 cuda)
-	for p in cuckatoo_mean_cuda_19 cuckatoo_lean_cuda_19; do
+	for p in cuckatoo_lean_cuda_19; do
 		cp "$rel/plugins/$p.cuckooplugin" "$out/plugins/"
 	done
 	;;

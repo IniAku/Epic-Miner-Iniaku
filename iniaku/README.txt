@@ -21,7 +21,7 @@ in epic-miner.toml, or on the command line: --region us
 Variants
 --------
   opencl : AMD GPUs (also works on NVIDIA)  -> plugin "ocl_cuckatoo"
-  cuda   : NVIDIA GPUs                      -> plugin "cuckatoo_mean_cuda_19"
+  cuda   : NVIDIA GPUs                      -> plugin "cuckatoo_lean_cuda_19"
   CPU plugins are included in every package (cuckatoo_mean_cpu_compat_19 / _avx2_19).
 
 Several GPUs: copy the [[mining.miner_plugin_config]] block once per GPU and set

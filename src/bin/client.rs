@@ -417,6 +417,19 @@ impl Controller {
 		self.send_message(&req_str)
 	}
 
+	/// Catat algoritma yg sedang diminta jaringan (dipakai pesan "Waiting for Cuckoo turn").
+	fn set_algorithm_needed(&self, algo: &str) {
+		let name = match algo {
+			"cuckoo" => "Cuckatoo",
+			"randomx" => "RandomX",
+			"progpow" => "ProgPow",
+			_ => "",
+		};
+		if let Ok(mut stats) = self.stats.write() {
+			stats.client_stats.algorithm_needed = name.to_string();
+		}
+	}
+
 	fn send_miner_job(&mut self, job: types::JobTemplate) -> Result<(), Error> {
 		let miner_message = types::MinerMessage::ReceivedSeed(job.epochs);
 		self.miner_tx.send(miner_message)?;
@@ -482,12 +495,13 @@ impl Controller {
 					if self.parse_algorithm() == algo_needed {
 						self.send_miner_job(job)
 					} else {
-						info!(
+						debug!(
 							LOGGER,
 							"my algo: {}, algo from job {}",
 							self.parse_algorithm(),
 							algo_needed
 						);
+						self.set_algorithm_needed(&algo_needed);
 						self.send_miner_stop()
 					}
 				}
@@ -555,12 +569,13 @@ impl Controller {
 					if self.parse_algorithm() == algo_needed {
 						self.send_miner_job(job)
 					} else {
-						info!(
+						debug!(
 							LOGGER,
 							"my algo: {}, algo from job {}",
 							self.parse_algorithm(),
 							algo_needed
 						);
+						self.set_algorithm_needed(&algo_needed);
 						self.send_miner_stop()
 					}
 				} else {

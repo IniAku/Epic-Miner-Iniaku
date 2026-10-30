@@ -68,7 +68,9 @@ jobs:
           build() {
             if ! "$@" > build.log 2>&1; then
               cat build.log
-              grep -E "^(error|  --> |warning: unused)|error:|cannot find|LINK : |fatal" build.log | head -30 | sed 's/^/::error::/'
+              # Satu anotasi berisi baris error + 60 baris terakhir (%0A = baris baru).
+              msg=$( (grep -nE "error|fatal|LINK" build.log | grep -v "^.*warning" | head -25; echo ----; tail -60 build.log) | tr -d '\r' | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+              echo "::error title=build failed::$msg"
               exit 1
             fi
             cat build.log

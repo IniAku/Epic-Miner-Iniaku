@@ -32,7 +32,13 @@ jobs:
       - name: Build (Ubuntu 20.04 container) & package
         run: |
           mkdir -p "$HOME/.cargo/registry"
-          ./iniaku/build-linux-release.sh "${{ steps.v.outputs.version }}"
+          if ! ./iniaku/build-linux-release.sh "${{ steps.v.outputs.version }}" > build.log 2>&1; then
+            cat build.log
+            msg=$( (grep -nE "error|fatal|not found|denied" build.log | head -25; echo ----; tail -60 build.log) | tr -d '\r' | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=linux build failed::$msg"
+            exit 1
+          fi
+          cat build.log
       - uses: actions/upload-artifact@v4
         with:
           name: linux

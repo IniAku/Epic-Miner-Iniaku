@@ -9,6 +9,11 @@ args:
       short: c
       long: config_file_path
       takes_value: true
+  - region:
+      help: "epic.iniaku.my.id pool region: auto (lowest ping, default), id, us or au"
+      short: r
+      long: region
+      takes_value: true
 subcommands:
   - new_config:
       about: Create a new copy of the epic-miner.toml in the current folder.

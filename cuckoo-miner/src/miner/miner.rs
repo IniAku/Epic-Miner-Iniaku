@@ -161,7 +161,9 @@ impl CuckooMiner {
 								edge_bits: solver.solutions.edge_bits as u8,
 								nonces: s.proof.to_vec(),
 							};
-							proof.to_difficulty_unscaled().to_num() >= target_difficulty
+							// Sama dgn penilaian node: C19 diskalakan graph_weight (1216 saat ini).
+							// Dulu unscaled (skala 1) → ~99% share C19 yg sah dibuang di miner.
+							proof.to_difficulty(height, 1).to_num() >= target_difficulty
 						})
 						.map(|s| {
 							s.clone()

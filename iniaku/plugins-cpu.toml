@@ -1,0 +1,5 @@
+# CPU (any x86-64). If your CPU supports AVX2, cuckatoo_mean_cpu_avx2_19 is faster.
+[[mining.miner_plugin_config]]
+plugin_name = "cuckatoo_mean_cpu_compat_19"
+[mining.miner_plugin_config.parameters]
+nthreads = 4

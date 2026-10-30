@@ -1,0 +1,15 @@
+# GPU via OpenCL (AMD, also works on NVIDIA). One block per GPU; device = index on the platform.
+# platform: 0 = default, 1 = AMD, 2 = NVIDIA
+[[mining.miner_plugin_config]]
+plugin_name = "ocl_cuckatoo"
+[mining.miner_plugin_config.parameters]
+platform = 0
+device = 0
+edge_bits = 19
+
+#[[mining.miner_plugin_config]]
+#plugin_name = "ocl_cuckatoo"
+#[mining.miner_plugin_config.parameters]
+#platform = 0
+#device = 1
+#edge_bits = 19

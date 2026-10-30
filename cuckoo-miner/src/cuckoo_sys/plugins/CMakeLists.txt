@@ -12,7 +12,7 @@ if(WIN32)
 else()
   set (FLAGS "-Wno-format -Wno-deprecated-declarations -D_POSIX_C_SOURCE=200112L ${OPT} ${DOPT} -I. ${CPPFLAGS} -pthread")
 endif()
-set (GPP_FLAGS "-march=native -m64 ${FLAGS}")
+set (GPP_FLAGS "-march=x86-64-v2 -mtune=generic -m64 ${FLAGS}") # dulu -march=native: binary rilis crash di CPU lain; v2 = SSE4.2 (2009+)
 set (CFLAGS "-Wno-format -fomit-frame-pointer ${OPT}")
 set (GCC_FLAGS "-m64 -std=gnu11 ${CFLAGS}")
 

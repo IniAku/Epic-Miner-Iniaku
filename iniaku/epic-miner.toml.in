@@ -1,0 +1,38 @@
+# epic-miner (epic.iniaku.my.id edition) — Cuckatoo19 miner for Epic Cash
+# This build mines ONLY to the epic.iniaku.my.id pool (TLS, port 3334).
+#
+# 1. Put your wallet address and a worker name in stratum_server_login:
+#       "<your Epic address>.<worker name>"
+# 2. Run ./epic-miner (Windows: epic-miner.exe)
+#
+# Epic rotates the mined algorithm every block; Cuckoo gets about 4% of blocks.
+# Outside a Cuckoo turn the miner waits ("Waiting for Cuckoo turn") — this is normal.
+
+[logging]
+log_to_stdout = true
+stdout_log_level = "Info"
+log_to_file = true
+file_log_level = "Info"
+log_file_path = "./epic-miner.log"
+log_file_append = true
+
+[mining]
+algorithm = "Cuckoo"
+run_tui = false
+
+# Pool region: "auto" (lowest ping, with automatic failover), "id", "us" or "au".
+# Can also be set on the command line: --region us
+region = "auto"
+
+stratum_server_login = "YOUR_EPIC_ADDRESS.worker1"
+stratum_server_password = "x"
+
+miner_plugin_dir = "plugins"
+
+[mining.randomx_config]
+threads = 1
+jit = true
+large_pages = false
+hard_aes = true
+
+@PLUGINS@

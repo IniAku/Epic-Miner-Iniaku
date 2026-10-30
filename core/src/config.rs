@@ -70,7 +70,13 @@ pub struct MinerConfig {
 	pub run_tui: bool,
 
 	/// mining loop by adding a sleep to the thread
+	/// Diabaikan di build iniaku: server pool ditanam di miner (lihat region).
+	#[serde(default)]
 	pub stratum_server_addr: String,
+
+	/// Region pool epic.iniaku.my.id: "auto" (ping terkecil), "id", "us" atau "au".
+	#[serde(default)]
+	pub region: Option<String>,
 
 	/// login for the stratum server
 	pub stratum_server_login: Option<String>,
@@ -88,6 +94,7 @@ pub struct MinerConfig {
 	pub miner_plugin_config: Vec<EpicMinerPluginConfig>,
 
 	// gpu devices
+	#[serde(default)]
 	pub gpu_config: Vec<GpuConfig>,
 }
 
@@ -103,6 +110,7 @@ impl Default for MinerConfig {
 			stratum_server_login: None,
 			stratum_server_password: None,
 			stratum_server_tls_enabled: None,
+			region: None,
 			gpu_config: vec![],
 		}
 	}

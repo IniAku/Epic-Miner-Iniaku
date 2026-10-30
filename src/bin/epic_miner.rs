@@ -44,6 +44,7 @@ extern crate slog;
 extern crate cursive;
 
 pub mod client;
+pub mod pools;
 pub mod mining;
 pub mod stats;
 pub mod types;
@@ -142,12 +143,23 @@ where
 			panic!("Error loading mining controller: {}", e);
 		});
 
+	// Hanya pool epic.iniaku.my.id: stratum_server_addr di config diabaikan.
+	let region = mining_config
+		.region
+		.clone()
+		.unwrap_or_else(|| "auto".to_string());
+	let servers = pools::ordered_servers(&region);
+	warn!(
+		LOGGER,
+		"Pool epic.iniaku.my.id, region {}: {}",
+		region,
+		servers.join(" -> ")
+	);
 	let cc = client::Controller::new(
 		algorithm.clone(),
-		&mining_config.stratum_server_addr,
+		servers,
 		mining_config.stratum_server_login.clone(),
 		mining_config.stratum_server_password.clone(),
-		mining_config.stratum_server_tls_enabled.clone(),
 		mc.tx.clone(),
 		stats.clone(),
 	)
@@ -250,7 +262,28 @@ fn main() {
 		.clone()
 		.unwrap();
 
-	let mining_config = global_config.members.as_mut().unwrap().mining.clone();
+	let mut mining_config = global_config.members.as_mut().unwrap().mining.clone();
+	if let Some(r) = args.value_of("region") {
+		mining_config.region = Some(r.to_string());
+	}
+	let region = mining_config
+		.region
+		.clone()
+		.unwrap_or_else(|| "auto".to_string())
+		.to_lowercase();
+	if !pools::is_valid_region(&region) {
+		eprintln!(
+			"Unknown region '{}'. Valid regions: {}",
+			region,
+			pools::REGIONS
+		);
+		std::process::exit(1);
+	}
+	mining_config.region = Some(region);
+	if mining_config.algorithm != Some(Algorithm::Cuckoo) {
+		eprintln!("This epic.iniaku.my.id build mines Cuckoo only: set algorithm = \"Cuckoo\".");
+		std::process::exit(1);
+	}
 
 	if cfg!(feature = "tui") && mining_config.run_tui {
 		log_conf.log_to_stdout = false;

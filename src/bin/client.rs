@@ -23,11 +23,12 @@ use serde_json;
 use stats;
 use std;
 use std::io::{self, BufRead, ErrorKind, Read, Write};
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::{mpsc, Arc, RwLock};
 use std::thread;
 use time;
 use types;
+use pools;
 use util::LOGGER;
 
 #[derive(Debug)]
@@ -70,7 +71,13 @@ impl Stream {
 		}
 	}
 	fn try_connect(&mut self, server_url: &str, tls: Option<bool>) -> Result<(), Error> {
-		match TcpStream::connect(server_url) {
+		// Batas waktu supaya server mati cepat di-failover (connect() biasa bisa menggantung lama).
+		let sock = server_url
+			.to_socket_addrs()
+			.ok()
+			.and_then(|mut a| a.next())
+			.ok_or_else(|| Error::ConnectionError(format!("Can't resolve {}", server_url)))?;
+		match TcpStream::connect_timeout(&sock, std::time::Duration::from_secs(10)) {
 			Ok(conn) => {
 				if tls.is_some() && tls.unwrap() {
 					let connector = TlsConnector::new().map_err(|e| {
@@ -160,6 +167,9 @@ impl BufRead for Stream {
 pub struct Controller {
 	_id: u32,
 	algorithm: Algorithm,
+	/// Server pool (lihat pools.rs), [0] = utama; sisanya cadangan failover.
+	servers: Vec<String>,
+	server_idx: usize,
 	server_url: String,
 	server_login: Option<String>,
 	server_password: Option<String>,
@@ -182,21 +192,26 @@ fn invlalid_error_response() -> types::RpcError {
 impl Controller {
 	pub fn new(
 		algorithm: Algorithm,
-		server_url: &str,
+		servers: Vec<String>,
 		server_login: Option<String>,
 		server_password: Option<String>,
-		server_tls_enabled: Option<bool>,
 		miner_tx: mpsc::Sender<types::MinerMessage>,
 		stats: Arc<RwLock<stats::Stats>>,
 	) -> Result<Controller, Error> {
 		let (tx, rx) = mpsc::channel::<types::ClientMessage>();
+		if servers.is_empty() {
+			return Err(Error::ConnectionError("no pool servers".to_string()));
+		}
 		Ok(Controller {
 			_id: 0,
 			algorithm,
-			server_url: server_url.to_string(),
+			server_url: servers[0].clone(),
+			servers,
+			server_idx: 0,
 			server_login: server_login,
 			server_password: server_password,
-			server_tls_enabled: server_tls_enabled,
+			// Pool iniaku hanya lewat TLS (port 3334).
+			server_tls_enabled: Some(true),
 			stream: None,
 			tx: tx,
 			rx: rx,
@@ -207,12 +222,42 @@ impl Controller {
 	}
 
 	pub fn try_connect(&mut self) -> Result<(), Error> {
+		self.server_url = self.servers[self.server_idx].clone();
 		self.stream = Some(Stream::new());
-		self.stream
+		if let Err(e) = self
+			.stream
 			.as_mut()
 			.unwrap()
-			.try_connect(&self.server_url, self.server_tls_enabled)?;
+			.try_connect(&self.server_url, self.server_tls_enabled)
+		{
+			self.stream = None;
+			return Err(e);
+		}
+		{
+			let mut stats = self.stats.write().unwrap();
+			stats.client_stats.server_url = self.server_url.clone();
+		}
 		Ok(())
+	}
+
+	/// Gagal konek → pindah ke server berikutnya (failover berputar).
+	fn next_server(&mut self) {
+		if self.servers.len() > 1 {
+			self.server_idx = (self.server_idx + 1) % self.servers.len();
+			warn!(
+				LOGGER,
+				"Switching to pool server {}", self.servers[self.server_idx]
+			);
+		}
+	}
+
+	/// Sedang di server cadangan & server utama sudah terjangkau lagi → kembali ke utama.
+	fn primary_back(&self) -> bool {
+		if self.server_idx == 0 {
+			return false;
+		}
+		let host = self.servers[0].rsplitn(2, ':').last().unwrap_or("");
+		pools::probe(host).is_some()
 	}
 
 	fn read_message(&mut self) -> Result<Option<String>, Error> {
@@ -627,6 +672,8 @@ impl Controller {
 		let status_interval = 30;
 		let mut next_status_request = time::get_time().sec + status_interval;
 		let mut next_server_retry = time::get_time().sec;
+		let failback_interval = 300;
+		let mut next_failback_check = time::get_time().sec + failback_interval;
 		// Request the first job template
 		thread::sleep(std::time::Duration::from_secs(1));
 		let mut was_disconnected = true;
@@ -643,10 +690,13 @@ impl Controller {
 							self.server_url,
 							server_retry_interval);
 						warn!(LOGGER, "{}", status);
-						let mut stats = self.stats.write().unwrap();
-						stats.client_stats.connection_status = status;
-						stats.client_stats.connected = false;
+						{
+							let mut stats = self.stats.write().unwrap();
+							stats.client_stats.connection_status = status;
+							stats.client_stats.connected = false;
+						}
 						self.stream = None;
+						self.next_server();
 					} else {
 						let status = format!(
 							"Connection Status: Connected to Epic server at {}.",
@@ -663,6 +713,19 @@ impl Controller {
 					}
 				}
 			} else {
+				// Failback: tiap 5 menit cek apakah server utama sudah hidup lagi.
+				if time::get_time().sec > next_failback_check {
+					next_failback_check = time::get_time().sec + failback_interval;
+					if self.primary_back() {
+						warn!(
+							LOGGER,
+							"Primary pool server {} is back, switching", self.servers[0]
+						);
+						self.server_idx = 0;
+						self.stream = None;
+						continue;
+					}
+				}
 				// get new job template
 				if was_disconnected {
 					let _ = self.send_login();

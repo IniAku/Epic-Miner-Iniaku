@@ -174,10 +174,21 @@ impl Controller {
 			i += 1;
 		}
 
-		info!(
-			LOGGER,
-			"Mining: Cuck(at)oo at {} gps (graphs per second)", sps_total
-		);
+		// Epic menggilir algoritma per block (Cuckoo ~4%): di luar giliran Cuckoo miner memang
+		// berhenti. Dulu cuma tampil "0 gps" sehingga miner mengira GPU/miner rusak.
+		let needed = self.stats.read().unwrap().client_stats.algorithm_needed.clone();
+		if sps_total > 0.0 || needed.is_empty() || needed == "Cuckatoo" {
+			info!(
+				LOGGER,
+				"Mining: Cuck(at)oo at {:.2} gps (graphs per second)", sps_total
+			);
+		} else {
+			info!(
+				LOGGER,
+				"Waiting for Cuckoo turn (network is mining {} now; Cuckoo gets ~4% of blocks)",
+				needed
+			);
+		}
 
 		if sps_total.is_finite() {
 			let mut s_stats = self.stats.write().unwrap();

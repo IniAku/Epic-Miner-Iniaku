@@ -5,4 +5,4 @@ node*
 target
 *.iml
 grin-miner.log
-build/
+build/dist/

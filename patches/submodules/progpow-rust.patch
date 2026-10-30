@@ -1,0 +1,13 @@
+diff --git a/pp_full/build.rs b/pp_full/build.rs
+index 3dd42b1..0841aec 100644
+--- a/pp_full/build.rs
++++ b/pp_full/build.rs
+@@ -47,7 +47,7 @@ fn compile_cmake() {
+ 		make.define("ETHASHCL", "OFF");
+ 	}
+ 
+-	make.build_target("").build();
++	make.build_target("all").build();
+ }
+ 
+ fn exec_if_newer<F: Fn()>(inpath: &str, outpath: &str, build: F) {

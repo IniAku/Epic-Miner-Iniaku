@@ -76,14 +76,11 @@ impl Stream {
 					let connector = TlsConnector::new().map_err(|e| {
 						Error::ConnectionError(format!("Can't create TLS connector: {:?}", e))
 					})?;
-					let url_port: Vec<&str> = server_url.split(":").collect();
-					let splitted_url: Vec<&str> = url_port[0].split(".").collect();
-					let base_host = format!(
-						"{}.{}",
-						splitted_url[splitted_url.len() - 2],
-						splitted_url[splitted_url.len() - 1]
-					);
-					let mut stream = connector.connect(&base_host, conn).map_err(|e| {
+					// Hostname lengkap utk SNI & verifikasi sertifikat. Dulu dipotong ke 2 label
+					// terakhir (id.epic.iniaku.my.id -> iniaku.my.id) sehingga TLS ke pool yg
+					// sertifikatnya utk subdomain selalu gagal.
+					let host = server_url.rsplitn(2, ':').last().unwrap_or(server_url);
+					let mut stream = connector.connect(host, conn).map_err(|e| {
 						Error::ConnectionError(format!("Can't establish TLS connection: {:?}", e))
 					})?;
 					stream.get_mut().set_nonblocking(true).map_err(|e| {

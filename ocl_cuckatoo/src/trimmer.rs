@@ -33,7 +33,9 @@ impl Trimmer {
 			.ok_or::<ocl::Error>("Can't find OpenCL platform".into())?;
 		let device = find_device(&platform, device_id)?;
 
-		let el_count = (1024 * 1024 * 16) << (edge_bits - 29);
+		// Satu bit per edge (edges) & per node (counters): NEDGES/32 u32. Dulu (16M << (eb-29))
+		// — sama utk eb>=29, tapi shift negatif (panic) utk C19 yg dipakai Epic.
+		let el_count = 1usize << (edge_bits - 5);
 		let res_buf: Vec<u32> = vec![0; RES_BUFFER_SIZE];
 
 		let context = Context::builder()
@@ -85,13 +87,17 @@ impl Trimmer {
 		let mut current_mode = Mode::SetCnt;
 		let mut current_uorv: u32 = 0;
 		let trims = if self.edge_bits >= 29 { 128 } else { 256 };
-		let enqs = 8 << (self.edge_bits - 29);
+		// Tiap work-item memproses 256 edge. C19 (2^19 edge) cukup 2048 work-item sekali enqueue;
+		// C29+ tetap 1024*256 work-item x (8 << (eb-29)) enqueue seperti semula.
+		let items = 1usize << (self.edge_bits - 8);
+		let gws = std::cmp::min(GLOBAL_WORK_SIZE, items);
+		let enqs = std::cmp::max(1, items / gws);
 
 		let mut kernel = Kernel::builder()
 			.name("LeanRound")
 			.program(&self.program)
 			.queue(self.q.clone())
-			.global_work_size(GLOBAL_WORK_SIZE)
+			.global_work_size(gws)
 			.local_work_size(SpatialDims::One(LOCAL_WORK_SIZE))
 			.arg(k[0])
 			.arg(k[1])
@@ -109,7 +115,7 @@ impl Trimmer {
 		macro_rules! kernel_enq (
         ($num:expr) => (
         for i in 0..$num {
-            offset = i * GLOBAL_WORK_SIZE;
+            offset = i * gws;
             unsafe {
                 kernel
                     .set_default_global_work_offset(SpatialDims::One(offset))

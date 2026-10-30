@@ -1,0 +1,19 @@
+diff --git a/build.rs b/build.rs
+index 6edaa72..d23e6a7 100644
+--- a/build.rs
++++ b/build.rs
+@@ -34,7 +34,7 @@ fn generate_bindings(out_dir: &str) {
+ }
+ 
+ fn compile_cmake() {
+-	cmake::Config::new("randomx").build_target("").build();
++	cmake::Config::new("randomx").build_target("all").build();
+ }
+ 
+ fn exec_if_newer<F: Fn()>(inpath: &str, outpath: &str, build: F) {
+diff --git a/randomx b/randomx
+--- a/randomx
++++ b/randomx
+@@ -1 +1 @@
+-Subproject commit 5316870972d81ad194f7403179b306223a3676ed
++Subproject commit 5316870972d81ad194f7403179b306223a3676ed-dirty

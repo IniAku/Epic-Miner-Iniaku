@@ -1,0 +1,54 @@
+[package]
+authors = ["The Rust Project Developers"]
+description = "Big integer implementation for Rust"
+documentation = "https://docs.rs/num-bigint"
+homepage = "https://github.com/rust-num/num-bigint"
+keywords = ["mathematics", "numerics", "bignum"]
+categories = [ "algorithms", "data-structures", "science" ]
+license = "MIT/Apache-2.0"
+name = "num-bigint"
+repository = "https://github.com/rust-num/num-bigint"
+version = "0.1.44"
+readme = "README.md"
+
+[[bench]]
+name = "bigint"
+
+[[bench]]
+name = "factorial"
+
+[[bench]]
+name = "gcd"
+
+[[bench]]
+harness = false
+name = "shootout-pidigits"
+
+[dependencies]
+
+[dependencies.num-integer]
+version = "0.1.36"
+default-features = false
+
+[dependencies.num-traits]
+version = "0.2.0"
+default-features = false
+features = ["std"]
+
+[dependencies.rand]
+optional = true
+version = ">= 0.3.14, < 0.5.0"
+
+[dependencies.rustc-serialize]
+optional = true
+version = "0.3.19"
+
+[dependencies.serde]
+optional = true
+version = ">= 0.7.0, < 0.9.0"
+
+[dev-dependencies.rand]
+version = ">= 0.3.14, < 0.5.0"
+
+[features]
+default = ["rand", "rustc-serialize"]

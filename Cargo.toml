@@ -103,3 +103,9 @@ built = "0.2"
 
 [dev-dependencies]
 cucumber_rust = { version = "^0.5.1", default-features = false }
+
+# Salinan lokal num 0.1 (via ocl-core-vector): derive RustcEncodable/Decodable sudah dihapus dari Rust.
+[patch.crates-io]
+num-complex = { path = "patches/num-complex-0.1.43" }
+num-bigint = { path = "patches/num-bigint-0.1.44" }
+num-rational = { path = "patches/num-rational-0.1.42" }

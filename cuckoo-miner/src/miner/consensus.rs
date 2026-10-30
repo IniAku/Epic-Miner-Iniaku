@@ -21,7 +21,7 @@ use byteorder::{BigEndian, ByteOrder};
 
 // constants from epic
 const DEFAULT_MIN_EDGE_BITS: u8 = 31;
-const SECOND_POW_EDGE_BITS: u8 = 29;
+const SECOND_POW_EDGE_BITS: u8 = 31; // node Epic: 31 (dulu 29 warisan Grin)
 const PROOF_SIZE: usize = 42;
 const BLOCK_TIME_SEC: u64 = 60;
 
@@ -35,16 +35,28 @@ const BASE_EDGE_BITS: u8 = 24;
 /// Compute weight of a graph as number of siphash bits defining the graph
 /// Must be made dependent on height to phase out smaller size over the years
 /// This can wait until end of 2019 at latest
+///
+/// Sama persis dgn node Epic (core/src/consensus.rs). Dulu `edge_bits - BASE_EDGE_BITS` meluap
+/// (u8) utk C19 → bobot salah → share C19 yg sah bisa tersaring di miner.
 pub fn graph_weight(height: u64, edge_bits: u8) -> u64 {
 	let mut xpr_edge_bits = edge_bits as u64;
 
 	let bits_over_min = edge_bits.saturating_sub(DEFAULT_MIN_EDGE_BITS);
-	let expiry_height = (1 << bits_over_min) * YEAR_HEIGHT;
+	let expiry_height = if height > 880_000 {
+		(1 << bits_over_min) * (YEAR_HEIGHT * 100)
+	} else {
+		(1 << bits_over_min) * YEAR_HEIGHT
+	};
 	if height >= expiry_height {
 		xpr_edge_bits = xpr_edge_bits.saturating_sub(1 + (height - expiry_height) / WEEK_HEIGHT);
 	}
 
-	(2 << (edge_bits - BASE_EDGE_BITS) as u64) * xpr_edge_bits
+	let shift = if edge_bits > BASE_EDGE_BITS {
+		edge_bits - BASE_EDGE_BITS
+	} else {
+		BASE_EDGE_BITS - edge_bits
+	};
+	(2 << shift as u64) * xpr_edge_bits
 }
 
 /// The difficulty is defined as the maximum target divided by the block hash.

@@ -22,7 +22,7 @@ Variants
 --------
   opencl : AMD GPUs (also works on NVIDIA)  -> plugin "ocl_cuckatoo"
   cuda   : NVIDIA GPUs                      -> plugin "cuckatoo_lean_cuda_19"
-  CPU plugins are included in every package (cuckatoo_mean_cpu_compat_19 / _avx2_19).
+  Linux packages also include CPU plugins (cuckatoo_mean_cpu_compat_19 / _avx2_19).
 
 Several GPUs: copy the [[mining.miner_plugin_config]] block once per GPU and set
 "device" to 0, 1, 2, ...
@@ -41,4 +41,4 @@ What this edition fixes compared to the official miner
 - Graph weight for C19 now matches the Epic node exactly
 - CPU plugins built for generic x86-64 (no crash on older CPUs)
 
-Source: https://github.com/IniAku  —  License: Apache-2.0 (see LICENSE)
+Source & releases: https://github.com/IniAku/epic-miner-iniaku  —  License: Apache-2.0 (see LICENSE)

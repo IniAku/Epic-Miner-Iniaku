@@ -1,0 +1,100 @@
+# Build & rilis epic-miner edisi epic.iniaku.my.id.
+# - push ke branch / PR : build Linux + Windows, paket jadi artifact
+# - push tag v*         : sama, lalu paket diunggah ke GitHub Releases
+name: release
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Apply submodule patches
+        run: iniaku/apply-submodule-patches.sh
+      - name: Version
+        id: v
+        run: echo "version=$(iniaku/version.sh)" >> "$GITHUB_OUTPUT"
+      # Ubuntu 20.04 (glibc 2.31) supaya paket jalan di HiveOS & Ubuntu 20.04+
+      - name: Build (Ubuntu 20.04 container) & package
+        run: |
+          mkdir -p "$HOME/.cargo/registry"
+          ./iniaku/build-linux-release.sh "${{ steps.v.outputs.version }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Version
+        id: v
+        shell: bash
+        run: echo "version=$(iniaku/version.sh)" >> "$GITHUB_OUTPUT"
+      - name: OpenCL SDK (OpenCL.lib)
+        shell: pwsh
+        run: |
+          $url = "https://github.com/KhronosGroup/OpenCL-SDK/releases/download/v2023.12.14/OpenCL-SDK-v2023.12.14-Win-x64.zip"
+          Invoke-WebRequest $url -OutFile ocl.zip
+          Expand-Archive ocl.zip -DestinationPath C:\ocl
+          $lib = (Get-ChildItem C:\ocl -Recurse -Filter OpenCL.lib | Select-Object -First 1).DirectoryName
+          "OCL_LIB_DIR=$lib" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - uses: dtolnay/rust-toolchain@stable
+      # Plugin CPU/CUDA tromp tidak dibangun di MSVC (CMake: IF NOT MSVC) → paket Windows = OpenCL.
+      - name: Build
+        shell: bash
+        run: |
+          export RUSTFLAGS="-L native=$OCL_LIB_DIR"
+          cargo build --release --no-default-features --features cpu,cuckoo_miner/no-plugin-build
+          cargo build --release -p ocl_cuckatoo
+      - name: Package
+        shell: bash
+        run: iniaku/package-windows.sh "${{ steps.v.outputs.version }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            dist/*.zip
+            dist/*.sha256
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, windows]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          fail_on_unmatched_files: true
+          body: |
+            epic-miner — epic.iniaku.my.id edition (Cuckatoo19 / Cuckoo for Epic Cash).
+            Mines only to the epic.iniaku.my.id pool (region auto / id / us / au).
+
+            - Linux OpenCL (AMD, also NVIDIA) and Linux CUDA (NVIDIA): glibc 2.31+ (HiveOS, Ubuntu 20.04+)
+            - Windows OpenCL (AMD and NVIDIA)
+
+            Set your address in epic-miner.toml: stratum_server_login = "<address>.<worker>"
+            See README.txt in the package.

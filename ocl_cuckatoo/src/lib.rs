@@ -48,18 +48,20 @@ fn env_u32(name: &str, default: u32, min: u32, max: u32) -> u32 {
 		.unwrap_or(default)
 }
 
-fn ocl_batch() -> u32 {
-	env_u32("OCL_BATCH", 256, 1, 4096)
+/// OCL_BATCH di-set user → dipakai; selain itu None = otomatis per GPU (batch::auto_batch).
+fn ocl_batch() -> Option<usize> {
+	std::env::var("OCL_BATCH").ok().map(|_| env_u32("OCL_BATCH", 256, 1, 4096) as usize)
 }
 
 fn ocl_trims() -> u32 {
 	env_u32("OCL_TRIMS", 96, 8, 512)
 }
 
-/// Dibaca miner (simbol opsional): > 1 = run_solver memproses banyak graf per panggilan.
+/// Dibaca miner (simbol opsional) saat plugin dimuat: > 1 = run_solver mode batch. Jumlah
+/// graf sebenarnya ditentukan plugin per GPU (OCL_BATCH atau otomatis), bukan nilai ini.
 #[no_mangle]
 pub extern "C" fn batch_size() -> uint32_t {
-	ocl_batch()
+	ocl_batch().unwrap_or(256) as uint32_t
 }
 
 #[no_mangle]
@@ -77,8 +79,15 @@ pub unsafe extern "C" fn create_solver_ctx(params: *mut SolverParams) -> *mut So
 		edge_bits = 19;
 	}
 	let (trimmer, batch) = if edge_bits == 19 {
-		let bt = BatchTrimmer::build(platform, device_id, edge_bits, ocl_batch() as usize, ocl_trims())
+		let bt = BatchTrimmer::build(platform, device_id, edge_bits, ocl_batch(), ocl_trims())
 			.expect("can't build batch trimmer");
+		eprintln!(
+			"ocl_cuckatoo: {} - C19 batch {} graphs, {} trims{}",
+			bt.device_name,
+			bt.batch,
+			bt.trims,
+			if ocl_batch().is_some() { " (OCL_BATCH)" } else { " (auto)" }
+		);
 		(None, Some(bt))
 	} else {
 		let t = Trimmer::build(platform, device_id, edge_bits).expect("can't build trimmer");
@@ -299,7 +308,7 @@ mod tests {
 		let k74 = [0xd23109bd4dac0bdf, 0x76fbe03c31ad8133, 0xd17f301a7a865e22, 0xbaf57c804957a342];
 		let k80 = [0x5a8792dce8508408, 0x0b253fd43e8d69ed, 0x821447be88274415, 0x1f209d183347b4f6];
 		let other = [1u64, 2, 3, 4];
-		let bt = BatchTrimmer::build(None, None, 19, 4, ocl_trims()).expect("can't build batch trimmer");
+		let bt = BatchTrimmer::build(None, None, 19, Some(4), ocl_trims()).expect("can't build batch trimmer");
 		let res = bt.run(&[other, k74, other, k80]).unwrap();
 		let mut max_left = 0;
 		for (g, first) in [(1usize, 0x19ceu64), (3, 0x1bc1)].iter() {

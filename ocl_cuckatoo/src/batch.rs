@@ -6,7 +6,8 @@
 // jadi jumlah perintah per graf turun dari ~770 ke ~1.
 
 use ocl;
-use ocl::{Buffer, Context, Kernel, Program, Queue, SpatialDims};
+use ocl::enums::{DeviceInfo, DeviceInfoResult};
+use ocl::{Buffer, Context, Device, Kernel, Program, Queue, SpatialDims};
 
 use trimmer::{find_device, find_platform};
 
@@ -19,6 +20,23 @@ pub const AUX_STRIDE: usize = 4 + 4 * MAX_EDGES;
 const MODE_SETCNT: u32 = 1;
 const MODE_TRIM: u32 = 2;
 const MODE_EXTRACT: u32 = 3;
+
+/// Batch otomatis dari spesifikasi GPU (tanpa izin admin — cukup query OpenCL):
+/// 8 graf per compute unit (SM NVIDIA / CU AMD), dibulatkan ke pangkat 2, 64..2048,
+/// dan memori buffer (~160 KB/graf utk C19) maksimal 1/4 memori GPU.
+pub fn auto_batch(device: &Device, edge_bits: u8) -> usize {
+	let cus = match device.info(DeviceInfo::MaxComputeUnits) {
+		Ok(DeviceInfoResult::MaxComputeUnits(n)) => n as usize,
+		_ => 32,
+	};
+	let mem = match device.info(DeviceInfo::GlobalMemSize) {
+		Ok(DeviceInfoResult::GlobalMemSize(n)) => n as usize,
+		_ => 2 << 30,
+	};
+	let per_graph = 2 * (1usize << (edge_bits - 3)) + AUX_STRIDE * 4;
+	let by_mem = std::cmp::max(1, mem / 4 / per_graph);
+	(cus * 8).next_power_of_two().max(64).min(2048).min(by_mem)
+}
 
 pub struct BatchTrimmer {
 	pub batch: usize,
@@ -39,12 +57,13 @@ impl BatchTrimmer {
 		platform_name: Option<&str>,
 		device_id: Option<usize>,
 		edge_bits: u8,
-		batch: usize,
+		batch: Option<usize>,
 		trims: u32,
 	) -> ocl::Result<BatchTrimmer> {
 		let platform = find_platform(platform_name)
 			.ok_or::<ocl::Error>("Can't find OpenCL platform".into())?;
 		let device = find_device(&platform, device_id)?;
+		let batch = batch.unwrap_or_else(|| auto_batch(&device, edge_bits));
 		let context = Context::builder().platform(platform).devices(device).build()?;
 		let q = Queue::new(&context, device, None)?;
 		let program = Program::builder()

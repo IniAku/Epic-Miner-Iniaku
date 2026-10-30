@@ -18,6 +18,16 @@ extern crate built;
 use std::env;
 
 fn main() {
+	// Hash commit utk banner versi (pengganti built::GIT_VERSION/libgit2).
+	if let Ok(out) = std::process::Command::new("git")
+		.args(&["rev-parse", "--short", "HEAD"])
+		.output()
+	{
+		if out.status.success() {
+			let hash = String::from_utf8_lossy(&out.stdout).trim().to_string();
+			println!("cargo:rustc-env=EPIC_MINER_GIT_HASH={}", hash);
+		}
+	}
 	let mut opts = built::Options::default();
 	opts.set_dependencies(true);
 	built::write_built_file_with_opts(

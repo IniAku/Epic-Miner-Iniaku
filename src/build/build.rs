@@ -30,10 +30,21 @@ fn main() {
 	}
 	let mut opts = built::Options::default();
 	opts.set_dependencies(true);
-	built::write_built_file_with_opts(
-		&opts,
-		env!("CARGO_MANIFEST_DIR"),
-		format!("{}{}", env::var("OUT_DIR").unwrap(), "/built.rs"),
-	)
-	.expect("Failed to acquire build-time information");
+	let built_path = format!("{}{}", env::var("OUT_DIR").unwrap(), "/built.rs");
+	built::write_built_file_with_opts(&opts, env!("CARGO_MANIFEST_DIR"), &built_path)
+		.expect("Failed to acquire build-time information");
+	// built 0.2 menulis path Windows (RUSTC = "C:\Users\...") tanpa escape → "unknown
+	// character escape". Ganti backslash di konstanta berisi path drive dgn slash.
+	let src = std::fs::read_to_string(&built_path).unwrap();
+	let fixed: Vec<String> = src
+		.lines()
+		.map(|l| {
+			if l.starts_with("pub const ") && l.contains(":\\") {
+				l.replace('\\', "/")
+			} else {
+				l.to_string()
+			}
+		})
+		.collect();
+	std::fs::write(&built_path, fixed.join("\n") + "\n").unwrap();
 }

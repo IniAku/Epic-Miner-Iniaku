@@ -69,7 +69,9 @@ jobs:
       - name: Build
         shell: bash
         run: |
-          export RUSTFLAGS="-L native=$OCL_LIB_DIR"
+          # crt-static: runtime C ditanam di exe/plugin — tanpa ini butuh VC++ 2015-2022
+          # Redistributable (vcruntime140.dll), yg tidak ada di banyak PC (exit 0xC0000135).
+          export RUSTFLAGS="-L native=$OCL_LIB_DIR -C target-feature=+crt-static"
           # Error compiler juga dikirim sbg anotasi (bisa dibaca tanpa login, log job tidak).
           build() {
             if ! "$@" > build.log 2>&1; then

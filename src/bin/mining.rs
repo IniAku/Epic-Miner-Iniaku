@@ -71,12 +71,14 @@ impl Controller {
 		// how often to output stats
 		let stat_output_interval = 2;
 		let mut next_stat_output = time::get_time().sec + stat_output_interval;
+		let mut discard_solutions = false;
 
 		loop {
 			while let Some(message) = self.rx.try_iter().next() {
 				debug!(LOGGER, "Miner received message: {:?}", message);
 				let result = match message {
 					types::MinerMessage::ReceivedJob(height, job_id, diff, pre_pow) => {
+						discard_solutions = false;
 						self.current_height = height;
 						self.current_job_id = job_id;
 						self.current_target_diff = diff;
@@ -97,6 +99,8 @@ impl Controller {
 					types::MinerMessage::StopJob => {
 						debug!(LOGGER, "Stopping jobs");
 						miner.pause_solvers();
+						// Giliran algoritma lain: sisa solusi job lama dibuang (bukan dikirim terlambat).
+						discard_solutions = true;
 						Ok(())
 					}
 					types::MinerMessage::Shutdown => {
@@ -117,7 +121,11 @@ impl Controller {
 			}
 
 			let solutions = miner.get_solutions();
-			if let Some(ss) = solutions {
+			if discard_solutions {
+				if let Some(ss) = solutions {
+					debug!(LOGGER, "Discarded {} solutions of a stopped job", ss.len());
+				}
+			} else if let Some(ss) = solutions {
 				let len = ss.len();
 				for i in ss {
 					let _ = self

@@ -278,6 +278,8 @@ impl Miner for CuckooMiner {
 			// height
 			self.pause_solvers();
 			paused = true;
+			// solusi height lama tidak berlaku lagi
+			sd.solutions.clear();
 		}
 		sd.job_id = job_id;
 		sd.height = height;
@@ -303,17 +305,20 @@ impl Miner for CuckooMiner {
 			// let time_elapsed=Instant::now()-time_pre_lock;
 			// println!("Get_solution Time spent waiting for lock: {}",
 			// time_elapsed.as_secs()*1000 +(time_elapsed.subsec_nanos()/1_000_000)as u64);
+			// Ambil SEMUA set solusi yg menunggu. Dulu cuma satu per panggilan (tiap 100 ms),
+			// padahal GPU cepat menghasilkan puluhan set/detik — antrean menumpuk & terkirim
+			// menit-menit sesudah giliran Cuckoo selesai ("Solution submitted too late").
 			if s.solutions.len() > 0 {
 				let mut solutions = Vec::new();
-				let sol = s.solutions.pop().unwrap();
-				let edge_bits = sol.edge_bits;
-
-				for i in 0..sol.num_sols {
-					solutions.push(CrSolution::new(
-						sol.sols[i as usize].id,
-						sol.sols[i as usize].nonce,
-						AlgorithmParams::Cuckoo(edge_bits, sol.sols[i as usize].proof.to_vec())
-					));
+				for sol in s.solutions.drain(..) {
+					let edge_bits = sol.edge_bits;
+					for i in 0..sol.num_sols {
+						solutions.push(CrSolution::new(
+							sol.sols[i as usize].id,
+							sol.sols[i as usize].nonce,
+							AlgorithmParams::Cuckoo(edge_bits, sol.sols[i as usize].proof.to_vec())
+						));
+					}
 				}
 
 				return Some(solutions);

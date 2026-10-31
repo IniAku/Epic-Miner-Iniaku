@@ -32,6 +32,7 @@ extern crate epic_miner_util as util;
 
 extern crate bufstream;
 extern crate native_tls;
+extern crate serde;
 extern crate time;
 #[macro_use]
 extern crate serde_derive;

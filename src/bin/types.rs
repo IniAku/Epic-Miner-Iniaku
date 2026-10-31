@@ -33,8 +33,23 @@ pub struct JobTemplate {
 	pub algorithm: String,
 }
 
+/// Proxy/pool sering mengirim notifikasi job dgn `"id": null` (atau angka); dulu gagal
+/// di-parse sehingga job ber-diff baru dari pool dibuang diam-diam (2026-10-31).
+fn id_or_empty<'de, D>(d: D) -> Result<String, D::Error>
+where
+	D: serde::Deserializer<'de>,
+{
+	use serde::Deserialize;
+	Ok(match Value::deserialize(d)? {
+		Value::String(s) => s,
+		Value::Null => String::new(),
+		v => v.to_string(),
+	})
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RpcRequest {
+	#[serde(default, deserialize_with = "id_or_empty")]
 	pub id: String,
 	pub jsonrpc: String,
 	pub method: String,
@@ -43,6 +58,7 @@ pub struct RpcRequest {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RpcResponse {
+	#[serde(default, deserialize_with = "id_or_empty")]
 	pub id: String,
 	pub method: String,
 	pub jsonrpc: String,

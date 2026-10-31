@@ -39,6 +39,10 @@ jobs:
             exit 1
           fi
           cat build.log
+      - name: HiveOS custom-miner package
+        run: |
+          v="${{ steps.v.outputs.version }}"
+          ./iniaku/package-hiveos.sh "dist/epic-miner-iniaku-$v-linux-x64-opencl.tar.gz" "$v"
       - uses: actions/upload-artifact@v4
         with:
           name: linux

@@ -12,7 +12,7 @@
 | Wallet and worker template | `%WAL%.%WORKER_NAME%` |
 | Pool URL | `us.epic.iniaku.my.id` / `id.epic.iniaku.my.id` / `au.epic.iniaku.my.id` (anything else = auto) |
 | Pass | `x` |
-| Extra config arguments | optional: `region=us amd=0,1 nvidia=none batch=512` |
+| Extra config arguments | optional: `region=us amd=0,1 nvidia=none batch=512 lan=<node LAN IP>` |
 
 - Every AMD and NVIDIA GPU is used via OpenCL by default (one solver per GPU).
 - Epic gives Cuckoo ~4% of blocks, so the GPUs only work during a Cuckoo turn. Between turns the

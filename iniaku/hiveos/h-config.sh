@@ -3,8 +3,10 @@
 #   Wallet and worker template: %WAL%.%WORKER_NAME%
 #   Pool URL:                   us.epic.iniaku.my.id (or id./au.) — anything else = auto
 #   Extra config arguments (optional, one per line or space separated):
-#     region=auto|id|us|au   amd=0,1   nvidia=0,2   batch=512
+#     region=auto|id|us|au   amd=0,1   nvidia=0,2   batch=512   lan=192.168.1.139
 #   amd/nvidia pick OpenCL device indexes; "none" disables a vendor. Default: every GPU.
+#   lan=IP: the pool node is in your own LAN (router without NAT loopback) — the region's
+#   hostname is pointed at that IP in /etc/hosts, so TLS still matches. Needs region=id|us|au.
 
 dir=$(dirname "${BASH_SOURCE[0]}")
 . "$dir/h-manifest.conf"
@@ -17,13 +19,14 @@ case "$CUSTOM_URL" in
 	*us.epic*) region=us ;;
 	*au.epic*) region=au ;;
 esac
-amd= nvidia= batch=
+amd= nvidia= batch= lan=
 for kv in $CUSTOM_USER_CONFIG; do
 	case "$kv" in
 		region=*) region=${kv#*=} ;;
 		amd=*) amd=${kv#*=} ;;
 		nvidia=*) nvidia=${kv#*=} ;;
 		batch=*) batch=${kv#*=} ;;
+		lan=*) lan=${kv#*=} ;;
 	esac
 done
 
@@ -82,3 +85,10 @@ EOF
 
 # OCL_BATCH is read by the OpenCL plugin at start (h-run.sh exports it).
 echo "${batch}" > "$dir/.ocl_batch"
+
+# lan=IP → "IP <region>.epic.iniaku.my.id" for h-run.sh to put in /etc/hosts.
+if [[ -n $lan && $region == auto ]]; then
+	echo "lan= needs region=id|us|au (or a regional Pool URL) — ignored"
+	lan=
+fi
+echo "${lan:+$lan $region.epic.iniaku.my.id}" > "$dir/.lan_host"

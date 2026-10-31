@@ -12,6 +12,7 @@ docker build -t "$img" -f "$root/iniaku/docker/Dockerfile.linux" "$root/iniaku/d
 # target terpisah (target-u2004) supaya tidak tercampur build host yg butuh glibc baru.
 docker run --rm --cpus=4 -u "$uid:$gid" -e HOME=/tmp/home \
 	-e CARGO_HOME=/tmp/home/.cargo \
+	-e INIAKU_VERSION="$version" \
 	-v "$root":/src -v "$userhome/.cargo/registry":/tmp/home/.cargo/registry \
 	"$img" sh -euc '
 		mkdir -p /tmp/home/.cargo

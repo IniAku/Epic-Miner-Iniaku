@@ -371,7 +371,12 @@ impl Controller {
 		let params = types::LoginParams {
 			login: login_str,
 			pass: password_str,
-			agent: format!("epic-miner/v{}", env!("CARGO_PKG_VERSION")),
+			// Agent dikenali pool (epic.iniaku.my.id) sebagai miner edisi iniaku; versi rilis
+			// diisi skrip build lewat INIAKU_VERSION.
+			agent: format!(
+				"epic-miner-iniaku/{}",
+				option_env!("INIAKU_VERSION").unwrap_or(concat!(env!("CARGO_PKG_VERSION"), "-iniaku"))
+			),
 		};
 		let req = types::RpcRequest {
 			id: self.last_request_id.to_string(),

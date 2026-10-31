@@ -8,7 +8,7 @@
 | Miner | Custom |
 | Miner name | auto-filled from the URL |
 | Installation URL | `https://epic.iniaku.my.id/storage/hiveos/iniaku_cuckoo-<version>.tar.gz` |
-| Hash algorithm | `cuckatoo19` |
+| Hash algorithm | `cuckatoo31` (HiveOS has no cuckatoo19 entry; it is only a dashboard label, the miner always mines C19) |
 | Wallet and worker template | `%WAL%.%WORKER_NAME%` |
 | Pool URL | `us.epic.iniaku.my.id` / `id.epic.iniaku.my.id` / `au.epic.iniaku.my.id` (anything else = auto) |
 | Pass | `x` |

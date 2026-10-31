@@ -2,7 +2,7 @@
 cd "$(dirname "$0")" || exit 1
 . h-manifest.conf
 
-[[ -s .ocl_batch ]] && export OCL_BATCH=$(<.ocl_batch)
+b=$(cat .ocl_batch 2>/dev/null); [[ -n $b ]] && export OCL_BATCH=$b
 mkdir -p "$(dirname "$CUSTOM_LOG_BASENAME")"
 # Marker: h-stats.sh only counts shares after the last start.
 echo "=== $CUSTOM_NAME $CUSTOM_VERSION start $(date -u '+%F %T') ===" >> "$CUSTOM_LOG_BASENAME.log"

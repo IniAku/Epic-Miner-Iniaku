@@ -39,6 +39,17 @@ OpenCL tuning (environment variables, optional):
   Windows:  set OCL_BATCH=512  then  epic-miner.exe --bench
   Linux:    OCL_BATCH=512 ./epic-miner --bench
 
+Use it next to SRBMiner (recommended for GPUs)
+----------------------------------------------
+Epic rotates the algorithm every block: ProgPoW gets about half of the blocks, Cuckoo
+about 4%. Run both on the same GPU to earn from both:
+  - SRBMiner (ProgPoW) on the epic.iniaku.my.id pool as usual, and
+  - this miner (Cuckoo) at the same time.
+This miner is idle while the network mines ProgPoW/RandomX and only uses the GPU during
+a Cuckoo turn (usually under a minute); SRBMiner slows down briefly during that time.
+Rewards are shared per algorithm, so Cuckoo shares earn from Cuckoo blocks, which have
+far fewer miners competing for them. Use different worker names, e.g. rig1 and rig1-cuckoo.
+
 "Waiting for Cuckoo turn"
 -------------------------
 Epic rotates the algorithm every block (ProgPoW / RandomX / Cuckoo). Cuckoo gets about

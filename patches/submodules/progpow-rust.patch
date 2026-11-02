@@ -1,8 +1,8 @@
 diff --git a/pp_full/build.rs b/pp_full/build.rs
-index 3dd42b1..ac2cdb7 100644
+index 3dd42b1..3df5bfa 100644
 --- a/pp_full/build.rs
 +++ b/pp_full/build.rs
-@@ -47,7 +47,31 @@ fn compile_cmake() {
+@@ -47,7 +47,42 @@ fn compile_cmake() {
  		make.define("ETHASHCL", "OFF");
  	}
  
@@ -13,9 +13,20 @@ index 3dd42b1..ac2cdb7 100644
 +		make.define("HUNTER_ENABLED", "OFF");
 +	}
 +
++	// cmake 0.1.42 does not know Visual Studio 2022: the generator can be given explicitly.
++	let explicit_generator = env::var("PROGPOW_CMAKE_GENERATOR").ok();
++	if let Some(generator) = &explicit_generator {
++		make.generator(generator);
++	}
++
 +	// Rust links the CRT statically on Windows (-C target-feature=+crt-static): /MT for C++ too.
 +	if env::var("CARGO_CFG_TARGET_FEATURE").map(|f| f.contains("crt-static")).unwrap_or(false) {
 +		make.static_crt(true);
++		// With an explicit generator the cmake crate no longer sets the per-config flags.
++		if explicit_generator.is_some() && env::var("CARGO_CFG_TARGET_ENV").map(|e| e == "msvc").unwrap_or(false) {
++			make.define("CMAKE_C_FLAGS_RELEASE", "/MT /O2 /Ob2 /DNDEBUG");
++			make.define("CMAKE_CXX_FLAGS_RELEASE", "/MT /O2 /Ob2 /DNDEBUG");
++		}
 +	}
 +
 +	// Locations of system packages (Windows CI: vcpkg Boost, Khronos OpenCL SDK).

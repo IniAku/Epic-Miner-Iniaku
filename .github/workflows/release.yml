@@ -63,7 +63,7 @@ jobs:
       - name: Boost (vcpkg)
         shell: pwsh
         run: |
-          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install boost-system:x64-windows-static
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install boost-system:x64-windows-static boost-algorithm:x64-windows-static boost-exception:x64-windows-static boost-functional:x64-windows-static boost-multiprecision:x64-windows-static boost-throw-exception:x64-windows-static
           $root = $env:VCPKG_INSTALLATION_ROOT -replace '\\','/'
           "CMAKE_TOOLCHAIN_FILE=$root/scripts/buildsystems/vcpkg.cmake" | Out-File -FilePath $env:GITHUB_ENV -Append
           "VCPKG_TARGET_TRIPLET=x64-windows-static" | Out-File -FilePath $env:GITHUB_ENV -Append

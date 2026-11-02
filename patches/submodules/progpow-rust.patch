@@ -1,8 +1,8 @@
 diff --git a/pp_full/build.rs b/pp_full/build.rs
-index 3dd42b1..3df5bfa 100644
+index 3dd42b1..288df61 100644
 --- a/pp_full/build.rs
 +++ b/pp_full/build.rs
-@@ -47,7 +47,42 @@ fn compile_cmake() {
+@@ -47,7 +47,44 @@ fn compile_cmake() {
  		make.define("ETHASHCL", "OFF");
  	}
  
@@ -42,7 +42,9 @@ index 3dd42b1..3df5bfa 100644
 +		}
 +	}
 +
-+	make.build_target("all").build();
++	// Visual Studio names the "build everything" target ALL_BUILD.
++	let msvc = env::var("CARGO_CFG_TARGET_ENV").map(|e| e == "msvc").unwrap_or(false);
++	make.build_target(if msvc { "ALL_BUILD" } else { "all" }).build();
  }
  
  fn exec_if_newer<F: Fn()>(inpath: &str, outpath: &str, build: F) {

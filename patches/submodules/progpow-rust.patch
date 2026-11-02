@@ -97,6 +97,20 @@ index a0da68d..1000767 100644
  	hunter_add_package(OpenCL)
  	find_package(OpenCL CONFIG REQUIRED)
  else()
+diff --git a/pp_full/lib/libexternal/CMakeLists.txt b/pp_full/lib/libexternal/CMakeLists.txt
+index 76b5c73..dcf0ccc 100644
+--- a/pp_full/lib/libexternal/CMakeLists.txt
++++ b/pp_full/lib/libexternal/CMakeLists.txt
+@@ -12,6 +12,9 @@ target_link_libraries(ppow ethcore ethash progpow)
+ 
+ if(ETHASHCL)
+ 	target_link_libraries(ppow ethash-cl)
++	# progpow.cpp includes CLMiner.h -> CL headers (not in a system path on Windows)
++	find_package(OpenCL REQUIRED)
++	target_include_directories(ppow PRIVATE ${OpenCL_INCLUDE_DIRS})
+ endif()
+ if(ETHASHCUDA)
+ 	target_link_libraries(ppow ethash-cuda)
 diff --git a/pp_full/lib/libexternal/progpow.cpp b/pp_full/lib/libexternal/progpow.cpp
 index a30d60d..3da7a91 100644
 --- a/pp_full/lib/libexternal/progpow.cpp

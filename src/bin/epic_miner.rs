@@ -284,9 +284,18 @@ fn main() {
 		std::process::exit(1);
 	}
 	mining_config.region = Some(region);
-	if mining_config.algorithm != Some(Algorithm::Cuckoo) {
-		eprintln!("This epic.iniaku.my.id build mines Cuckoo only: set algorithm = \"Cuckoo\".");
-		std::process::exit(1);
+	match mining_config.algorithm {
+		Some(Algorithm::Cuckoo) => {}
+		#[cfg(any(feature = "opencl", feature = "cuda"))]
+		Some(Algorithm::ProgPow) => {}
+		_ => {
+			eprintln!(
+				"This epic.iniaku.my.id build mines {}: set algorithm = {}.",
+				if cfg!(any(feature = "opencl", feature = "cuda")) { "Cuckoo or ProgPow" } else { "Cuckoo only" },
+				if cfg!(any(feature = "opencl", feature = "cuda")) { "\"Cuckoo\" or \"ProgPow\"" } else { "\"Cuckoo\"" }
+			);
+			std::process::exit(1);
+		}
 	}
 
 	if cfg!(feature = "tui") && mining_config.run_tui {

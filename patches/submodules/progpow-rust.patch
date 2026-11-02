@@ -1,13 +1,112 @@
 diff --git a/pp_full/build.rs b/pp_full/build.rs
-index 3dd42b1..0841aec 100644
+index 3dd42b1..ac2cdb7 100644
 --- a/pp_full/build.rs
 +++ b/pp_full/build.rs
-@@ -47,7 +47,7 @@ fn compile_cmake() {
+@@ -47,7 +47,31 @@ fn compile_cmake() {
  		make.define("ETHASHCL", "OFF");
  	}
  
 -	make.build_target("").build();
++	// Hunter (2018) downloads its packages from dead mirrors: use system Boost/OpenCL unless
++	// PROGPOW_HUNTER=1 is set.
++	if env::var("PROGPOW_HUNTER").map(|v| v != "1").unwrap_or(true) {
++		make.define("HUNTER_ENABLED", "OFF");
++	}
++
++	// Rust links the CRT statically on Windows (-C target-feature=+crt-static): /MT for C++ too.
++	if env::var("CARGO_CFG_TARGET_FEATURE").map(|f| f.contains("crt-static")).unwrap_or(false) {
++		make.static_crt(true);
++	}
++
++	// Locations of system packages (Windows CI: vcpkg Boost, Khronos OpenCL SDK).
++	for name in &[
++		"CMAKE_TOOLCHAIN_FILE",
++		"VCPKG_TARGET_TRIPLET",
++		"OpenCL_INCLUDE_DIR",
++		"OpenCL_LIBRARY",
++		"BOOST_ROOT",
++	] {
++		if let Ok(value) = env::var(name) {
++			make.define(name, value);
++		}
++	}
++
 +	make.build_target("all").build();
  }
  
  fn exec_if_newer<F: Fn()>(inpath: &str, outpath: &str, build: F) {
+diff --git a/pp_full/lib/CMakeLists.txt b/pp_full/lib/CMakeLists.txt
+index 6b8ce2c..22c65cf 100644
+--- a/pp_full/lib/CMakeLists.txt
++++ b/pp_full/lib/CMakeLists.txt
+@@ -61,6 +61,9 @@ endfunction()
+ hunter_add_package(Boost COMPONENTS system)
+ find_package(Boost CONFIG REQUIRED COMPONENTS system)
+ 
++# Only the ethminer API server needed these; the progpow library does not link them.
++# Without Hunter (HUNTER_ENABLED=OFF) Boost comes from the system.
++if(HUNTER_ENABLED)
+ hunter_add_package(jsoncpp)
+ find_package(jsoncpp CONFIG REQUIRED)
+ 
+@@ -69,6 +72,7 @@ find_package(libjson-rpc-cpp CONFIG REQUIRED)
+ 
+ hunter_add_package(CppNetlibUri)
+ find_package(CppNetlibUri CONFIG REQUIRED)
++endif()
+ 
+ configureProject()
+ 
+diff --git a/pp_full/lib/libethash-cl/CLMiner.cpp b/pp_full/lib/libethash-cl/CLMiner.cpp
+index cc46da4..c69861f 100644
+--- a/pp_full/lib/libethash-cl/CLMiner.cpp
++++ b/pp_full/lib/libethash-cl/CLMiner.cpp
+@@ -246,7 +246,8 @@ std::vector<cl::Device> getDevices(std::vector<cl::Platform> const& _platforms,
+ 	try
+ 	{
+ 		_platforms[platform_num].getDevices(
+-			CL_DEVICE_TYPE_GPU | CL_DEVICE_TYPE_ACCELERATOR,
++			// PROGPOW_OPENCL_ANY_DEVICE=1: also CPU OpenCL devices (PoCL), for testing only.
++			getenv("PROGPOW_OPENCL_ANY_DEVICE") ? CL_DEVICE_TYPE_ALL : (CL_DEVICE_TYPE_GPU | CL_DEVICE_TYPE_ACCELERATOR),
+ 			&devices
+ 		);
+ 	}
+diff --git a/pp_full/lib/libethash-cl/CMakeLists.txt b/pp_full/lib/libethash-cl/CMakeLists.txt
+index a0da68d..1000767 100644
+--- a/pp_full/lib/libethash-cl/CMakeLists.txt
++++ b/pp_full/lib/libethash-cl/CMakeLists.txt
+@@ -19,7 +19,7 @@ set(SOURCES
+ 	${CMAKE_CURRENT_BINARY_DIR}/CLMiner_kernel.h
+ )
+ 
+-if(MSVC)
++if(MSVC AND HUNTER_ENABLED)
+ 	hunter_add_package(OpenCL)
+ 	find_package(OpenCL CONFIG REQUIRED)
+ else()
+diff --git a/pp_full/lib/libexternal/progpow.cpp b/pp_full/lib/libexternal/progpow.cpp
+index a30d60d..3da7a91 100644
+--- a/pp_full/lib/libexternal/progpow.cpp
++++ b/pp_full/lib/libexternal/progpow.cpp
+@@ -42,7 +42,10 @@ inline void cl_configure(int devicesCount, int m_dagLoadMode, int m_dagCreateDev
+             m_dagLoadMode,
+             m_dagCreateDevice,
+             m_exit))
++    {
++        std::cerr << "ProgPoW: no usable OpenCL GPU found (check the GPU driver / OpenCL runtime)" << std::endl;
+         exit(1);
++    }
+ 
+     CLMiner::setNumInstances(m_openclDeviceCount);
+ }
+@@ -85,7 +88,10 @@ extern "C" {
+                 false,
+                 false
+             ))
++        {
++            std::cerr << "ProgPoW: no usable CUDA GPU found (check the NVIDIA driver)" << std::endl;
+             exit(1);
++        }
+ 
+         CUDAMiner::setParallelHash(m_parallelHash);
+         #endif

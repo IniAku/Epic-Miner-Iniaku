@@ -56,6 +56,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Submodule patches
+        shell: bash
+        run: iniaku/apply-submodule-patches.sh
+      # ProgPoW (progpow-rust/pp_full, C++): Boost from vcpkg (static, /MT) instead of Hunter.
+      - name: Boost (vcpkg)
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install boost-system:x64-windows-static
+          $root = $env:VCPKG_INSTALLATION_ROOT -replace '\\','/'
+          "CMAKE_TOOLCHAIN_FILE=$root/scripts/buildsystems/vcpkg.cmake" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VCPKG_TARGET_TRIPLET=x64-windows-static" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "LIBCLANG_PATH=C:/Program Files/LLVM/bin" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Version
         id: v
         shell: bash
@@ -68,6 +80,9 @@ jobs:
           Expand-Archive ocl.zip -DestinationPath C:\ocl
           $lib = (Get-ChildItem C:\ocl -Recurse -Filter OpenCL.lib | Select-Object -First 1).DirectoryName
           "OCL_LIB_DIR=$lib" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $inc = (Get-ChildItem C:\ocl -Recurse -Filter cl.h | Where-Object { $_.Directory.Name -eq 'CL' } | Select-Object -First 1).Directory.Parent.FullName
+          "OpenCL_INCLUDE_DIR=$($inc -replace '\\','/')" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "OpenCL_LIBRARY=$((Join-Path $lib 'OpenCL.lib') -replace '\\','/')" | Out-File -FilePath $env:GITHUB_ENV -Append
       - uses: dtolnay/rust-toolchain@stable
       # Plugin CPU/CUDA tromp tidak dibangun di MSVC (CMake: IF NOT MSVC) → paket Windows = OpenCL.
       - name: Build
@@ -88,7 +103,8 @@ jobs:
             fi
             cat build.log
           }
-          build cargo build --release --no-default-features --features cpu,cuckoo_miner/no-plugin-build
+          # opencl = Cuckoo OpenCL plugin + ProgPoW OpenCL (for iniaku-miner's GPU engine)
+          build cargo build --release --no-default-features --features cpu,opencl,cuckoo_miner/no-plugin-build
           build cargo build --release -p ocl_cuckatoo
       - name: Package
         shell: bash

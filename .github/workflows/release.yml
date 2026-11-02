@@ -97,7 +97,7 @@ jobs:
             if ! "$@" > build.log 2>&1; then
               cat build.log
               # Satu anotasi berisi baris error + 60 baris terakhir (%0A = baris baru).
-              msg=$( (grep -nE "error|fatal|LINK" build.log | grep -v "^.*warning" | head -25; echo ----; tail -60 build.log) | tr -d '\r' | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+              msg=$( (grep -niE "error|fatal|LINK" build.log | grep -vi "warning" | head -25; echo ----; sed -n '/failed to run custom build command/,/^warning: build failed\|^error: could not compile/p' build.log | grep -vE "^\s*(running|cargo:|-- )" | grep -iE "error|fatal|could not|not found|missing|undefined|unresolved|\.cpp|\.h\b|LNK|C[0-9]{4}" | head -60; echo ----; tail -25 build.log) | sed 's/\x1b\[[0-9;]*m//g' | tr -d '\r' | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
               echo "::error title=build failed::$msg"
               exit 1
             fi

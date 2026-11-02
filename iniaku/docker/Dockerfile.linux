@@ -14,4 +14,7 @@ ENV RUSTUP_HOME=/opt/rustup CARGO_HOME=/opt/cargo
 ENV PATH=/usr/local/cuda-12.4/bin:/opt/cargo/bin:$PATH
 RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.99.1 --no-modify-path \
  && chmod -R a+rX /opt/rustup /opt/cargo
+# ProgPoW (progpow-rust/pp_full): system Boost instead of Hunter
+RUN apt-get update && apt-get install -y --no-install-recommends libboost-dev libboost-system-dev \
+ && rm -rf /var/lib/apt/lists/*
 WORKDIR /src

@@ -18,7 +18,8 @@ docker run --rm --cpus=4 -u "$uid:$gid" -e HOME=/tmp/home \
 		mkdir -p /tmp/home/.cargo
 		export CARGO_TARGET_DIR=/src/target-u2004
 		export CMAKE_POLICY_VERSION_MINIMUM=3.5 RUSTFLAGS="-C link-args=-Wl,-rpath,\$ORIGIN"
-		cargo build --release --no-default-features --features cpu
+		# opencl = ProgPoW (OpenCL, also NVIDIA) for iniaku-miner + Cuckoo OpenCL plugin crate
+		cargo build --release --no-default-features --features cpu,opencl
 		cargo build --release -p ocl_cuckatoo
 		cargo build --release -p cuckoo_miner --features cuckoo_miner/build-cuda-plugins
 	'

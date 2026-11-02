@@ -19,6 +19,10 @@ cp "$rel/epic-miner" "$out/"
 if ldd "$rel/epic-miner" | grep -q librandomx; then
 	cp "$(find "$rel/build" -name librandomx.so | head -1)" "$out/"
 fi
+# ProgPoW (opencl feature): libppow.so next to the binary (rpath $ORIGIN)
+if ldd "$rel/epic-miner" | grep -q libppow; then
+	cp "$(find "$rel/build" -name libppow.so | head -1)" "$out/"
+fi
 for p in cuckatoo_mean_cpu_compat_19 cuckatoo_mean_cpu_avx2_19 cuckatoo_lean_cpu_compat_19; do
 	cp "$rel/plugins/$p.cuckooplugin" "$out/plugins/"
 done

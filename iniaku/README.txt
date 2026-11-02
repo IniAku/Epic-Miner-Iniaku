@@ -27,6 +27,17 @@ Variants
 Several GPUs: copy the [[mining.miner_plugin_config]] block once per GPU and set
 "device" to 0, 1, 2, ...
 
+ProgPoW (GPU)
+-------------
+This build can also mine ProgPoW on the GPU (OpenCL, AMD and NVIDIA). In epic-miner.toml set
+    algorithm = "ProgPow"
+and one block per GPU:
+    [[mining.gpu_config]]
+    device = 0
+    driver = 2
+The GPU mines in the ProgPoW turn and waits in the other turns. iniaku-miner
+(github.com/IniAku/iniaku-miner) uses this to run ProgPoW next to XMRig in one miner.
+
 Benchmark / GPU test
 --------------------
   ./epic-miner --bench      (Windows: epic-miner.exe --bench)

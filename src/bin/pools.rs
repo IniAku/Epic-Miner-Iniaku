@@ -20,13 +20,14 @@ use std::time::{Duration, Instant};
 use util::LOGGER;
 
 /// (region, host) — stratum TLS di port `POOL_PORT`.
-pub const POOLS: [(&str, &str); 3] = [
+pub const POOLS: [(&str, &str); 4] = [
 	("id", "id.epic.iniaku.my.id"),
 	("us", "us.epic.iniaku.my.id"),
 	("au", "au.epic.iniaku.my.id"),
+	("eu", "eu.epic.iniaku.my.id"),
 ];
 pub const POOL_PORT: u16 = 3334;
-pub const REGIONS: &str = "auto, id, us, au";
+pub const REGIONS: &str = "auto, id, us, au, eu";
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 

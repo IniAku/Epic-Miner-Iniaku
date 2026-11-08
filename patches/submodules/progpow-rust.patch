@@ -502,18 +502,17 @@ index a30d60d..252435f 100644
          if (miner == NULL){
              exit(1);
 diff --git a/pp_full/lib/libexternal/progpow.h b/pp_full/lib/libexternal/progpow.h
-index 0fbd12d..7bb8071 100644
+index 0fbd12d..6e4338c 100644
 --- a/pp_full/lib/libexternal/progpow.h
 +++ b/pp_full/lib/libexternal/progpow.h
-@@ -19,6 +19,7 @@ extern "C" {
+@@ -15,6 +15,7 @@
+ extern "C" {
+ #endif
+     bool progpow_destroy(void* miner);
++    bool progpow_gpu_ready(void* miner);
+     void* progpow_gpu_init(unsigned device, unsigned driver);
      void progpow_gpu_configure(uint32_t devicesCount);
      void progpow_gpu_compute(void* miner, const void* header, uint64_t height, int epoch, uint64_t boundary, uint64_t startNonce);
-     bool progpow_gpu_get_solutions(void* miner, void* data);
-+    bool progpow_gpu_ready(void* miner);
- #if defined(__cplusplus)
- }
- #endif
-\ No newline at end of file
 diff --git a/pp_full/src/ffi.rs b/pp_full/src/ffi.rs
 index 8eeb68f..fb1167e 100644
 --- a/pp_full/src/ffi.rs

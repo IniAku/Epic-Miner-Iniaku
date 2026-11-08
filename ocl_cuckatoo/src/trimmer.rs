@@ -153,23 +153,68 @@ impl Trimmer {
 	}
 }
 
+fn platform_label(p: &Platform) -> String {
+	format!("{} / {}", p.name().unwrap_or_default(), p.vendor().unwrap_or_default()).to_lowercase()
+}
+
+fn gpu_count(p: &Platform) -> usize {
+	Device::list(p, Some(ocl::flags::DEVICE_TYPE_GPU)).map(|d| d.len()).unwrap_or(0)
+}
+
+/// IniAku: never just take the first platform. On rigs with an integrated Intel GPU the Intel
+/// platform often comes first and every device number wrapped onto the iGPU.
+/// INIAKU_OCL_PLATFORM (index or part of the name/vendor) overrides; otherwise the selector from
+/// the config (1 = AMD, 2 = NVIDIA); otherwise the first platform with an NVIDIA/AMD GPU, then any
+/// platform with a GPU, then the default platform.
 pub fn find_platform(selector: Option<&str>) -> Option<Platform> {
-	match selector {
-		None => Some(Platform::default()),
-		Some(sel) => Platform::list().into_iter().find(|p| {
-			if let Ok(vendor) = p.name() {
-				vendor.contains(sel)
-			} else {
-				false
+	let platforms = Platform::list();
+	if let Ok(sel) = std::env::var("INIAKU_OCL_PLATFORM") {
+		let sel = sel.trim().to_lowercase();
+		if !sel.is_empty() && sel != "auto" {
+			let found = match sel.parse::<usize>() {
+				Ok(i) => platforms.get(i).cloned(),
+				Err(_) => platforms.iter().find(|p| platform_label(p).contains(&sel)).cloned(),
+			};
+			if found.is_some() {
+				return found;
 			}
-		}),
+			eprintln!("ocl_cuckatoo: no OpenCL platform matches INIAKU_OCL_PLATFORM={}, choosing automatically", sel);
+		}
 	}
+	if let Some(sel) = selector {
+		let sel = sel.to_lowercase();
+		if let Some(p) = platforms.iter().find(|p| platform_label(p).contains(&sel)) {
+			return Some(p.clone());
+		}
+	}
+	let discrete = |p: &&Platform| {
+		let l = platform_label(p);
+		(l.contains("nvidia") || l.contains("amd") || l.contains("advanced micro")) && gpu_count(p) > 0
+	};
+	platforms
+		.iter()
+		.find(discrete)
+		.or_else(|| platforms.iter().find(|p| gpu_count(p) > 0))
+		.cloned()
+		.or_else(|| Some(Platform::default()))
 }
 
 pub fn find_device(platform: &Platform, selector: Option<usize>) -> ocl::Result<Device> {
 	match selector {
 		None => Device::first(platform),
-		Some(index) => Device::by_idx_wrap(platform, index),
+		Some(index) => {
+			let count = gpu_count(platform);
+			if count > 0 && index >= count {
+				eprintln!(
+					"ocl_cuckatoo: device {} does not exist on platform {} ({} GPU(s)); using GPU {} again",
+					index,
+					platform.name().unwrap_or_default(),
+					count,
+					index % count
+				);
+			}
+			Device::by_idx_wrap(platform, index)
+		}
 	}
 }
 

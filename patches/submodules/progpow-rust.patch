@@ -71,10 +71,24 @@ index 6b8ce2c..22c65cf 100644
  configureProject()
  
 diff --git a/pp_full/lib/libethash-cl/CLMiner.cpp b/pp_full/lib/libethash-cl/CLMiner.cpp
-index cc46da4..e01f3b2 100644
+index cc46da4..579a34f 100644
 --- a/pp_full/lib/libethash-cl/CLMiner.cpp
 +++ b/pp_full/lib/libethash-cl/CLMiner.cpp
-@@ -246,7 +246,8 @@ std::vector<cl::Device> getDevices(std::vector<cl::Platform> const& _platforms,
+@@ -8,10 +8,12 @@
+ #include <libdevcore/SHA3.h>
+ #include "CLMiner_kernel.h"
+ #include <iostream>
++#include <cstdlib>
++#include <thread>
+ #include <vector>
+ #include <fstream>
+ 
+-#define MAX_MINERS 4
++#define MAX_MINERS 32
+ 
+ using namespace dev;
+ using namespace eth;
+@@ -246,7 +248,8 @@ std::vector<cl::Device> getDevices(std::vector<cl::Platform> const& _platforms,
  	try
  	{
  		_platforms[platform_num].getDevices(
@@ -84,7 +98,7 @@ index cc46da4..e01f3b2 100644
  			&devices
  		);
  	}
-@@ -259,6 +260,66 @@ std::vector<cl::Device> getDevices(std::vector<cl::Platform> const& _platforms,
+@@ -259,6 +262,66 @@ std::vector<cl::Device> getDevices(std::vector<cl::Platform> const& _platforms,
  	return devices;
  }
  
@@ -151,7 +165,152 @@ index cc46da4..e01f3b2 100644
  }
  
  }
-@@ -363,8 +424,6 @@ bool CLMiner::configureGPU(
+@@ -267,24 +330,107 @@ std::vector<cl::Device> getDevices(std::vector<cl::Platform> const& _platforms,
+ unsigned CLMiner::s_platformId = 0;
+ unsigned CLMiner::s_numInstances = 0;
+ vector<int> CLMiner::s_devices(MAX_MINERS, -1);
++std::atomic<unsigned> CLMiner::s_created(0);
++std::atomic<unsigned> CLMiner::s_failed(0);
+ 
+ CLMiner::CLMiner(unsigned _index): current(0,0,-1,0) {
+ 	index = _index;
++	++s_created;
++}
++
++// Frees everything that holds GPU memory. Never throws: it also runs after a failure.
++void CLMiner::releaseResources()
++{
++	try
++	{
++		if (m_queue())
++			m_queue.finish();
++	}
++	catch (...) {}
++	try
++	{
++		m_searchKernel = cl::Kernel();
++		m_dagKernel = cl::Kernel();
++		m_dag = cl::Buffer();
++		m_light = cl::Buffer();
++		m_header = cl::Buffer();
++		m_searchBuffer = cl::Buffer();
++		m_queue = cl::CommandQueue();
++		m_context = cl::Context();
++	}
++	catch (...) {}
++}
++
++void CLMiner::deviceFailed(std::string const& reason)
++{
++	releaseResources();
++	m_ready = false;
++	m_retryAt = std::chrono::steady_clock::now() + std::chrono::minutes(5);
++	if (!m_countedFailed)
++	{
++		m_countedFailed = true;
++		++s_failed;
++	}
++	std::cerr << "ProgPoW: GPU " << index << " stopped: " << reason << std::endl;
++	if (s_failed.load() >= s_created.load())
++	{
++		std::cerr << "ProgPoW: no GPU can mine, exiting" << std::endl;
++		std::_Exit(1);
++	}
++	std::cerr << "ProgPoW: other GPUs keep mining, GPU " << index << " retries in 5 minutes" << std::endl;
++}
++
++void CLMiner::deviceRecovered()
++{
++	m_ready = true;
++	if (m_countedFailed)
++	{
++		m_countedFailed = false;
++		--s_failed;
++		std::cerr << "ProgPoW: GPU " << index << " is mining again" << std::endl;
++	}
+ }
+ 
++// A C++ exception must not reach Rust: it aborts the whole process and every GPU with it.
+ void CLMiner::compute(const void* header, uint64_t height, int epoch, uint64_t target, uint64_t startNonce)
++{
++	try
++	{
++		if (!m_ready && std::chrono::steady_clock::now() < m_retryAt)
++		{
++			std::this_thread::sleep_for(std::chrono::seconds(1));
++			return;
++		}
++		computeWork(header, height, epoch, target, startNonce);
++	}
++	catch (cl::Error const& err)
++	{
++		deviceFailed(ethCLErrorHelper("OpenCL error", err));
++	}
++	catch (std::exception const& err)
++	{
++		deviceFailed(err.what());
++	}
++}
++
++void CLMiner::computeWork(const void* header, uint64_t height, int epoch, uint64_t target, uint64_t startNonce)
+ {
+ 	uint32_t const c_zero = 0;
++	bool const recovering = !m_ready;
+ 	current.startNonce = startNonce;
+ 
+-	if (current.height != height || current.epoch != epoch) {
++	if (recovering || current.height != height || current.epoch != epoch) {
+ 
+ 		uint64_t period_seed = height / PROGPOW_PERIOD;
+ 
+-		if (current.epoch != epoch || old_period_seed != period_seed){
++		if (recovering || current.epoch != epoch || old_period_seed != period_seed){
+ 			// initialize dag for the epoch
+-			init(epoch, height);
++			if (!init(epoch, height)) {
++				deviceFailed("could not build the DAG (see the message above)");
++				return;
++			}
+ 			old_period_seed = period_seed;
++			deviceRecovered();
+ 		}
+ 
+ 		current.height = height;
+@@ -323,16 +469,26 @@ bool CLMiner::get_solutions(void* data)
+ 	uint32_t const c_zero = 0;
+ 	uint32_t results[c_maxSearchResults + 9];
+ 
+-	m_queue.enqueueReadBuffer(m_searchBuffer, CL_TRUE, 0, sizeof(results), &results);
++	if (!m_ready)
++		return false;
+ 
+-	if (results[0] > 0) {
+-		uint64_t nonce = current.startNonce + results[1];
++	try
++	{
++		m_queue.enqueueReadBuffer(m_searchBuffer, CL_TRUE, 0, sizeof(results), &results);
+ 
+-		m_queue.enqueueWriteBuffer(m_searchBuffer, CL_FALSE, 0, sizeof(c_zero), &c_zero);
++		if (results[0] > 0) {
++			uint64_t nonce = current.startNonce + results[1];
+ 
+-		memcpy((uint8_t*)data, &nonce, sizeof(uint64_t));
+-		memcpy(((uint8_t*)data) + sizeof(uint64_t), results + 2, sizeof(uint32_t) * 8);
+-		return true;
++			m_queue.enqueueWriteBuffer(m_searchBuffer, CL_FALSE, 0, sizeof(c_zero), &c_zero);
++
++			memcpy((uint8_t*)data, &nonce, sizeof(uint64_t));
++			memcpy(((uint8_t*)data) + sizeof(uint64_t), results + 2, sizeof(uint32_t) * 8);
++			return true;
++		}
++	}
++	catch (cl::Error const& err)
++	{
++		deviceFailed(ethCLErrorHelper("OpenCL error", err));
+ 	}
+ 
+ 	return false;
+@@ -363,8 +519,6 @@ bool CLMiner::configureGPU(
  	bool _exit
  )
  {
@@ -160,7 +319,7 @@ index cc46da4..e01f3b2 100644
  	_localWorkSize = ((_localWorkSize + 7) / 8) * 8;
  	s_workgroupSize = _localWorkSize;
  	s_initialGlobalWorkSize = _globalWorkSizeMultiplier * _localWorkSize;
-@@ -375,10 +434,18 @@ bool CLMiner::configureGPU(
+@@ -375,10 +529,18 @@ bool CLMiner::configureGPU(
  	vector<cl::Platform> platforms = getPlatforms();
  	if (platforms.empty())
  		return false;
@@ -181,7 +340,17 @@ index cc46da4..e01f3b2 100644
  	for (auto const& device: devices)
  	{
  		cl_ulong result = 0;
-@@ -452,6 +519,10 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+@@ -403,6 +565,9 @@ bool CLMiner::configureGPU(
+ 
+ bool CLMiner::init(int epoch, uint64_t block_number)
+ {
++	// The old DAG must be gone before the new one is built: a GPU may not hold two.
++	releaseResources();
++
+ 	EthashAux::LightType light = EthashAux::light(epoch);
+ 
+ 	// get all platforms
+@@ -452,9 +617,13 @@ bool CLMiner::init(int epoch, uint64_t block_number)
  			return false;
  		}
  
@@ -191,7 +360,46 @@ index cc46da4..e01f3b2 100644
 +
  		// use selected device
  		int idx = index % devices.size();
- 		unsigned deviceId = s_devices[idx] > -1 ? s_devices[idx] : index;
+-		unsigned deviceId = s_devices[idx] > -1 ? s_devices[idx] : index;
++		unsigned deviceId = (static_cast<size_t>(idx) < s_devices.size() && s_devices[idx] > -1) ? s_devices[idx] : index;
+ 		//m_hwmoninfo.deviceIndex = deviceId % devices.size();
+ 		cl::Device& device = devices[deviceId % devices.size()];
+ 		string device_version = device.getInfo<CL_DEVICE_VERSION>();
+diff --git a/pp_full/lib/libethash-cl/CLMiner.h b/pp_full/lib/libethash-cl/CLMiner.h
+index 1384c02..0d94d2b 100644
+--- a/pp_full/lib/libethash-cl/CLMiner.h
++++ b/pp_full/lib/libethash-cl/CLMiner.h
+@@ -6,6 +6,9 @@
+ #pragma once
+ 
+ 
++#include <atomic>
++#include <chrono>
++#include <string>
+ #include <libprogpow/ProgPow.h>
+ #include <libdevcore/Worker.h>
+ #include <libethcore/EthashAux.h>
+@@ -93,8 +96,20 @@ public:
+ 
+ 	void compute(const void* header, uint64_t height, int epoch, uint64_t target, uint64_t startNonce);
+ 	bool get_solutions(void* data);
++	bool ready() { return m_ready; }
+ 
+ private:
++	void computeWork(const void* header, uint64_t height, int epoch, uint64_t target, uint64_t startNonce);
++	void releaseResources();
++	void deviceFailed(std::string const& reason);
++	void deviceRecovered();
++
++	bool m_ready = false;
++	bool m_countedFailed = false;
++	std::chrono::steady_clock::time_point m_retryAt;
++	static std::atomic<unsigned> s_created;
++	static std::atomic<unsigned> s_failed;
++
+ 	cl::Context m_context;
+ 	cl::CommandQueue m_queue;
+ 	cl::Kernel m_searchKernel;
 diff --git a/pp_full/lib/libethash-cl/CMakeLists.txt b/pp_full/lib/libethash-cl/CMakeLists.txt
 index a0da68d..1000767 100644
 --- a/pp_full/lib/libethash-cl/CMakeLists.txt
@@ -205,6 +413,30 @@ index a0da68d..1000767 100644
  	hunter_add_package(OpenCL)
  	find_package(OpenCL CONFIG REQUIRED)
  else()
+diff --git a/pp_full/lib/libethash-cuda/CUDAMiner.cpp b/pp_full/lib/libethash-cuda/CUDAMiner.cpp
+index 4144339..cd18977 100644
+--- a/pp_full/lib/libethash-cuda/CUDAMiner.cpp
++++ b/pp_full/lib/libethash-cuda/CUDAMiner.cpp
+@@ -27,7 +27,7 @@ using namespace std;
+ using namespace dev;
+ using namespace eth;
+ 
+-#define MAX_MINERS 4
++#define MAX_MINERS 32
+ 
+ unsigned CUDAMiner::s_numInstances = 0;
+ 
+diff --git a/pp_full/lib/libethcore/miner.h b/pp_full/lib/libethcore/miner.h
+index 5774dc5..f1af9ca 100644
+--- a/pp_full/lib/libethcore/miner.h
++++ b/pp_full/lib/libethcore/miner.h
+@@ -6,4 +6,6 @@ class Miner{
+ public:
+     virtual void compute(const void* header, uint64_t height, int epoch, uint64_t target, uint64_t startNonce) = 0;
+     virtual bool get_solutions(void* data) = 0;
++    // false while this GPU cannot mine (for example its DAG could not be built)
++    virtual bool ready() { return true; }
+ };
 diff --git a/pp_full/lib/libexternal/CMakeLists.txt b/pp_full/lib/libexternal/CMakeLists.txt
 index 76b5c73..dcf0ccc 100644
 --- a/pp_full/lib/libexternal/CMakeLists.txt
@@ -220,9 +452,18 @@ index 76b5c73..dcf0ccc 100644
  if(ETHASHCUDA)
  	target_link_libraries(ppow ethash-cuda)
 diff --git a/pp_full/lib/libexternal/progpow.cpp b/pp_full/lib/libexternal/progpow.cpp
-index a30d60d..3da7a91 100644
+index a30d60d..252435f 100644
 --- a/pp_full/lib/libexternal/progpow.cpp
 +++ b/pp_full/lib/libexternal/progpow.cpp
+@@ -3,7 +3,7 @@
+ 
+ #define ERROR_NOT_GPU "Isn't possible found a GPU"
+ 
+-#define MAX_MINERS 4
++#define MAX_MINERS 32
+ 
+ using namespace dev;
+ using namespace eth;
 @@ -42,7 +42,10 @@ inline void cl_configure(int devicesCount, int m_dagLoadMode, int m_dagCreateDev
              m_dagLoadMode,
              m_dagCreateDevice,
@@ -245,3 +486,80 @@ index a30d60d..3da7a91 100644
  
          CUDAMiner::setParallelHash(m_parallelHash);
          #endif
+@@ -121,6 +127,14 @@ extern "C" {
+         return ((Miner*) miner)->compute(header, height, epoch, boundary, startNonce);
+     }
+ 
++    bool progpow_gpu_ready(void* miner) {
++        if (miner == NULL){
++            return false;
++        }
++
++        return ((Miner*) miner)->ready();
++    }
++
+     bool progpow_gpu_get_solutions(void* miner, void* data) {
+         if (miner == NULL){
+             exit(1);
+diff --git a/pp_full/lib/libexternal/progpow.h b/pp_full/lib/libexternal/progpow.h
+index 0fbd12d..7bb8071 100644
+--- a/pp_full/lib/libexternal/progpow.h
++++ b/pp_full/lib/libexternal/progpow.h
+@@ -19,6 +19,7 @@ extern "C" {
+     void progpow_gpu_configure(uint32_t devicesCount);
+     void progpow_gpu_compute(void* miner, const void* header, uint64_t height, int epoch, uint64_t boundary, uint64_t startNonce);
+     bool progpow_gpu_get_solutions(void* miner, void* data);
++    bool progpow_gpu_ready(void* miner);
+ #if defined(__cplusplus)
+ }
+ #endif
+\ No newline at end of file
+diff --git a/pp_full/src/ffi.rs b/pp_full/src/ffi.rs
+index 8eeb68f..fb1167e 100644
+--- a/pp_full/src/ffi.rs
++++ b/pp_full/src/ffi.rs
+@@ -17,6 +17,10 @@ extern "C" {
+ 	);
+ }
+ 
++extern "C" {
++	pub fn progpow_gpu_ready(miner: *mut ::std::os::raw::c_void) -> bool;
++}
++
+ extern "C" {
+ 	pub fn progpow_destroy(miner: *mut ::std::os::raw::c_void) -> bool;
+ }
+diff --git a/pp_full/src/types.rs b/pp_full/src/types.rs
+index b5219b0..0c3669b 100644
+--- a/pp_full/src/types.rs
++++ b/pp_full/src/types.rs
+@@ -77,6 +77,14 @@ impl GPU {
+ 		Ok(())
+ 	}
+ 
++	/// false while this GPU cannot mine (for example its DAG could not be built)
++	pub fn ready(&self) -> bool {
++		match self.miner {
++			Some(miner) => unsafe { progpow_gpu_ready(miner) },
++			None => false,
++		}
++	}
++
+ 	pub fn solutions(&self) -> Result<Option<(u64, [u8; 32])>, &str> {
+ 		if let None = self.miner {
+ 			return Err(MINER_UNINITIALIZED);
+diff --git a/src/hardware/gpu.rs b/src/hardware/gpu.rs
+index 60d7926..e77cc21 100644
+--- a/src/hardware/gpu.rs
++++ b/src/hardware/gpu.rs
+@@ -17,6 +17,10 @@ impl PpGPU {
+ 		self.gpu.compute(header, height, epoch, target, start_nonce);
+ 	}
+ 
++	pub fn ready(&self) -> bool {
++		self.gpu.ready()
++	}
++
+ 	pub fn get_solutions(&self) -> Option<(u64, [u8; 32])> {
+ 		self.gpu.solutions().unwrap()
+ 	}

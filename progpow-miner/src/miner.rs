@@ -112,6 +112,22 @@ impl PpMiner {
 			gpu.compute_with_startnonce(header, height, (height / 30000) as i32, target, util::get_random_nonce());
 			let end = timestamp();
 
+			if !gpu.ready() {
+				// This GPU could not build its DAG: report no speed, the others keep mining.
+				let mut stats = Stats {
+					last_start_time: start,
+					last_end_time: end,
+					last_solution_time: last_solution_time,
+					iterations: iter_count as u32,
+					hashes_per_sec: 0,
+					has_errored: true,
+					..Default::default()
+				};
+				stats.set_plugin_name(ALGORITHM_NAME);
+				shared_data.write().unwrap().stats[instance] = stats;
+				continue;
+			}
+
 			iter_count += WORK_PER_CALL;
 			let still_valid = { height == shared_data.read().unwrap().height };
 			if still_valid {

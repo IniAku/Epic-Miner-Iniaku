@@ -71,7 +71,7 @@ index 6b8ce2c..22c65cf 100644
  configureProject()
  
 diff --git a/pp_full/lib/libethash-cl/CLMiner.cpp b/pp_full/lib/libethash-cl/CLMiner.cpp
-index cc46da4..579a34f 100644
+index cc46da4..2c38524 100644
 --- a/pp_full/lib/libethash-cl/CLMiner.cpp
 +++ b/pp_full/lib/libethash-cl/CLMiner.cpp
 @@ -8,10 +8,12 @@
@@ -175,8 +175,8 @@ index cc46da4..579a34f 100644
  CLMiner::CLMiner(unsigned _index): current(0,0,-1,0) {
  	index = _index;
 +	++s_created;
-+}
-+
+ }
+ 
 +// Frees everything that holds GPU memory. Never throws: it also runs after a failure.
 +void CLMiner::releaseResources()
 +{
@@ -190,7 +190,7 @@ index cc46da4..579a34f 100644
 +	{
 +		m_searchKernel = cl::Kernel();
 +		m_dagKernel = cl::Kernel();
-+		m_dag = cl::Buffer();
++		for (auto& b : m_dag) b = cl::Buffer();
 +		m_light = cl::Buffer();
 +		m_header = cl::Buffer();
 +		m_searchBuffer = cl::Buffer();
@@ -228,8 +228,8 @@ index cc46da4..579a34f 100644
 +		--s_failed;
 +		std::cerr << "ProgPoW: GPU " << index << " is mining again" << std::endl;
 +	}
- }
- 
++}
++
 +// A C++ exception must not reach Rust: it aborts the whole process and every GPU with it.
  void CLMiner::compute(const void* header, uint64_t height, int epoch, uint64_t target, uint64_t startNonce)
 +{
@@ -276,6 +276,24 @@ index cc46da4..579a34f 100644
  		}
  
  		current.height = height;
+@@ -297,7 +443,7 @@ void CLMiner::compute(const void* header, uint64_t height, int epoch, uint64_t t
+ 		m_searchKernel.setArg(0, m_searchBuffer);
+ 
+ 		//set difficulty to kernel
+-		m_searchKernel.setArg(4, target);
++		m_searchKernel.setArg(7, target);
+ 	}
+ 
+ 	if (current.header != nullptr) {
+@@ -310,7 +456,7 @@ void CLMiner::compute(const void* header, uint64_t height, int epoch, uint64_t t
+ 	m_queue.enqueueWriteBuffer(m_header, CL_FALSE, 0, current.header->size, current.header->data());
+ 
+ 	// set start nonce
+-	m_searchKernel.setArg(3, startNonce);
++	m_searchKernel.setArg(6, startNonce);
+ 
+ 	// run search kernel
+ 	m_queue.enqueueNDRangeKernel(m_searchKernel, cl::NullRange, m_globalWorkSize, m_workgroupSize);
 @@ -323,16 +469,26 @@ bool CLMiner::get_solutions(void* data)
  	uint32_t const c_zero = 0;
  	uint32_t results[c_maxSearchResults + 9];
@@ -365,8 +383,107 @@ index cc46da4..579a34f 100644
  		//m_hwmoninfo.deviceIndex = deviceId % devices.size();
  		cl::Device& device = devices[deviceId % devices.size()];
  		string device_version = device.getInfo<CL_DEVICE_VERSION>();
+@@ -501,6 +670,34 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+ 
+ 		uint64_t dagBytes = ethash_get_datasize(light->light->block_number);
+ 		uint32_t dagElms = (unsigned)(dagBytes / (PROGPOW_LANES * PROGPOW_DAG_LOADS * 4));
++
++		// IniAku: NVIDIA OpenCL allows one buffer of only 1/4 of the VRAM (CL_DEVICE_MAX_MEM_ALLOC_SIZE),
++		// less than the ~2 GB DAG on 4-6 GB cards: split the DAG over up to 4 buffers.
++		// INIAKU_OCL_MAX_ALLOC_MB lowers the limit (testing the split path on cards without it).
++		cl_ulong maxAlloc = 0;
++		device.getInfo(CL_DEVICE_MAX_MEM_ALLOC_SIZE, &maxAlloc);
++		if (const char* env = getenv("INIAKU_OCL_MAX_ALLOC_MB"))
++		{
++			cl_ulong mb = strtoull(env, nullptr, 10);
++			if (mb > 0 && (maxAlloc == 0 || mb * 1024 * 1024 < maxAlloc))
++				maxAlloc = mb * 1024 * 1024;
++		}
++		const uint64_t nodeBytes = sizeof(node); // 64: chunk edges on whole DAG nodes (and dag_t)
++		uint64_t maxChunk = maxAlloc ? (maxAlloc / nodeBytes) * nodeBytes : dagBytes;
++		if (maxChunk == 0) maxChunk = nodeBytes;
++		unsigned dagSplit = (unsigned)((dagBytes + maxChunk - 1) / maxChunk);
++		if (dagSplit < 1) dagSplit = 1;
++		if (dagSplit > 4)
++		{
++			std::cerr << "ProgPoW: DAG of " << (dagBytes >> 20) << " MB needs " << dagSplit
++				<< " buffers of at most " << (maxChunk >> 20) << " MB (max 4): GPU memory too small" << std::endl;
++			return false;
++		}
++		uint64_t chunkBytes = (dagBytes + dagSplit - 1) / dagSplit;
++		chunkBytes = ((chunkBytes + nodeBytes - 1) / nodeBytes) * nodeBytes;
++		if (dagSplit > 1)
++			std::cerr << "ProgPoW: DAG " << (dagBytes >> 20) << " MB in " << dagSplit << " buffers of "
++				<< (chunkBytes >> 20) << " MB (largest buffer this GPU allows: " << (maxAlloc >> 20) << " MB)" << std::endl;
+ 		uint32_t lightWords = (unsigned)(light->data().size() / sizeof(node));
+ 
+ 		// patch source code
+@@ -517,6 +714,8 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+ 		addDefinition(code, "MAX_OUTPUTS", c_maxSearchResults);
+ 		addDefinition(code, "PLATFORM", platformId);
+ 		addDefinition(code, "COMPUTE", computeCapability);
++		addDefinition(code, "DAG_SPLIT", dagSplit);
++		addDefinition(code, "DAG_CHUNK", (unsigned)(chunkBytes / (PROGPOW_DAG_LOADS * 4)));
+ 
+         /*ofstream out;
+         out.open("kernel.cl");
+@@ -555,7 +754,11 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+ 			//cllog << "Creating light cache buffer, size" << light->data().size();
+ 			m_light = cl::Buffer(m_context, CL_MEM_READ_ONLY, light->data().size());
+ 			//cllog << "Creating DAG buffer, size" << dagBytes;
+-			m_dag = cl::Buffer(m_context, CL_MEM_READ_ONLY, dagBytes);
++			for (unsigned c = 0; c < dagSplit; c++)
++			{
++				uint64_t size = (c + 1 < dagSplit) ? chunkBytes : dagBytes - chunkBytes * c;
++				m_dag[c] = cl::Buffer(m_context, CL_MEM_READ_ONLY, size);
++			}
+ 			//cllog << "Loading kernels";
+ 			m_searchKernel = cl::Kernel(program, "ethash_search");
+ 			m_dagKernel = cl::Kernel(program, "ethash_calculate_dag_item");
+@@ -572,8 +775,10 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+ 		m_header = cl::Buffer(m_context, CL_MEM_READ_ONLY, 32);
+ 
+ 		m_searchKernel.setArg(1, m_header);
+-		m_searchKernel.setArg(2, m_dag);
+-		m_searchKernel.setArg(5, 0);
++		// Unused DAG arguments point at buffer 0 (the kernel only reads them when DAG_SPLIT needs them).
++		for (unsigned c = 0; c < 4; c++)
++			m_searchKernel.setArg(2 + c, m_dag[c < dagSplit ? c : 0]);
++		m_searchKernel.setArg(8, 0);
+ 
+ 		// create mining buffers
+ 		//ETHCL_LOG("Creating mining buffer");
+@@ -585,15 +790,23 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+ 		if (restWork > 0) fullRuns++;
+ 
+ 		m_dagKernel.setArg(1, m_light);
+-		m_dagKernel.setArg(2, m_dag);
+ 		m_dagKernel.setArg(3, ~0u);
+ 
+ 		auto startDAG = std::chrono::steady_clock::now();
+-		for (uint32_t i = 0; i < fullRuns; i++)
++		const uint32_t chunkNodes = (uint32_t)(chunkBytes / nodeBytes);
++		for (unsigned c = 0; c < dagSplit; c++)
+ 		{
+-			m_dagKernel.setArg(0, i * m_globalWorkSize);
+-			m_queue.enqueueNDRangeKernel(m_dagKernel, cl::NullRange, m_globalWorkSize, m_workgroupSize);
+-			m_queue.finish();
++			const uint32_t base = chunkNodes * c;
++			const uint32_t end = (c + 1 < dagSplit) ? base + chunkNodes : work;
++			m_dagKernel.setArg(2, m_dag[c]);
++			m_dagKernel.setArg(4, base);
++			m_dagKernel.setArg(5, end);
++			for (uint32_t i = base / m_globalWorkSize; i < fullRuns && i * m_globalWorkSize < end; i++)
++			{
++				m_dagKernel.setArg(0, i * m_globalWorkSize);
++				m_queue.enqueueNDRangeKernel(m_dagKernel, cl::NullRange, m_globalWorkSize, m_workgroupSize);
++				m_queue.finish();
++			}
+ 		}
+ 		auto endDAG = std::chrono::steady_clock::now();
+ 
 diff --git a/pp_full/lib/libethash-cl/CLMiner.h b/pp_full/lib/libethash-cl/CLMiner.h
-index 1384c02..0d94d2b 100644
+index 1384c02..c9adcc0 100644
 --- a/pp_full/lib/libethash-cl/CLMiner.h
 +++ b/pp_full/lib/libethash-cl/CLMiner.h
 @@ -6,6 +6,9 @@
@@ -379,7 +496,7 @@ index 1384c02..0d94d2b 100644
  #include <libprogpow/ProgPow.h>
  #include <libdevcore/Worker.h>
  #include <libethcore/EthashAux.h>
-@@ -93,8 +96,20 @@ public:
+@@ -93,13 +96,26 @@ public:
  
  	void compute(const void* header, uint64_t height, int epoch, uint64_t target, uint64_t startNonce);
  	bool get_solutions(void* data);
@@ -400,6 +517,69 @@ index 1384c02..0d94d2b 100644
  	cl::Context m_context;
  	cl::CommandQueue m_queue;
  	cl::Kernel m_searchKernel;
+ 	cl::Kernel m_dagKernel;
+-	cl::Buffer m_dag;
++	// IniAku: DAG in up to 4 buffers (NVIDIA OpenCL caps one buffer at 1/4 of the VRAM).
++	cl::Buffer m_dag[4];
+ 	cl::Buffer m_light;
+ 	cl::Buffer m_header;
+ 	cl::Buffer m_searchBuffer;
+diff --git a/pp_full/lib/libethash-cl/CLMiner_kernel.cl b/pp_full/lib/libethash-cl/CLMiner_kernel.cl
+index b4f402a..68d0794 100644
+--- a/pp_full/lib/libethash-cl/CLMiner_kernel.cl
++++ b/pp_full/lib/libethash-cl/CLMiner_kernel.cl
+@@ -152,7 +152,10 @@ __attribute__((reqd_work_group_size(GROUP_SIZE, 1, 1)))
+ __kernel void ethash_search(
+     __global volatile uint* restrict g_output,
+     __constant hash32_t const* g_header,
+-    __global dag_t const* g_dag,
++    __global dag_t const* g_dag0,
++    __global dag_t const* g_dag1,
++    __global dag_t const* g_dag2,
++    __global dag_t const* g_dag3,
+     ulong start_nonce,
+     ulong target,
+     uint hack_false
+@@ -171,7 +174,7 @@ __kernel void ethash_search(
+     // Load the first portion of the DAG into the cache
+     for (uint32_t word = lid*PROGPOW_DAG_LOADS; word < PROGPOW_CACHE_WORDS; word += GROUP_SIZE*PROGPOW_DAG_LOADS)
+     {
+-        dag_t load = g_dag[word/PROGPOW_DAG_LOADS];
++        dag_t load = DAG_LOAD(word/PROGPOW_DAG_LOADS);
+         for (int i = 0; i<PROGPOW_DAG_LOADS; i++)
+             c_dag[word + i] = load.s[i];
+     }
+@@ -207,7 +210,7 @@ __kernel void ethash_search(
+         #pragma unroll 1
+         for (uint32_t l = 0; l < PROGPOW_CNT_DAG; l++)
+ 		{
+-            progPowLoop(l, mix, g_dag, c_dag, share[0].uint64s, hack_false);
++            progPowLoop(l, mix, g_dag0, g_dag1, g_dag2, g_dag3, c_dag, share[0].uint64s, hack_false);
+ 		}
+ 
+         // Reduce mix data to a per-lane 32-bit digest
+@@ -512,10 +515,12 @@ static void SHA3_512(uint2* s, uint isolate)
+ 	keccak_f1600_no_absorb(s, 8, isolate);
+ }
+ 
+-__kernel void ethash_calculate_dag_item(uint start, __global hash64_t const* g_light, __global hash64_t * g_dag, uint isolate)
++// g_dag is the buffer holding nodes [chunk_base, chunk_end) of the DAG (one of DAG_SPLIT buffers).
++__kernel void ethash_calculate_dag_item(uint start, __global hash64_t const* g_light, __global hash64_t * g_dag, uint isolate, uint chunk_base, uint chunk_end)
+ {
+ 	uint const node_index = start + get_global_id(0);
+ 	if (node_index * sizeof(hash64_t) >= PROGPOW_DAG_BYTES) return;
++	if (node_index < chunk_base || node_index >= chunk_end) return;
+ 
+ 	hash200_t dag_node;
+ 	copy(dag_node.uint4s, g_light[node_index % LIGHT_WORDS].uint4s, 4);
+@@ -530,5 +535,5 @@ __kernel void ethash_calculate_dag_item(uint start, __global hash64_t const* g_l
+ 		}
+ 	}
+ 	SHA3_512(dag_node.uint2s, isolate);
+-	copy(g_dag[node_index].uint4s, dag_node.uint4s, 4);
++	copy(g_dag[node_index - chunk_base].uint4s, dag_node.uint4s, 4);
+ }
+\ No newline at end of file
 diff --git a/pp_full/lib/libethash-cl/CMakeLists.txt b/pp_full/lib/libethash-cl/CMakeLists.txt
 index a0da68d..1000767 100644
 --- a/pp_full/lib/libethash-cl/CMakeLists.txt
@@ -513,6 +693,45 @@ index 0fbd12d..6e4338c 100644
      void* progpow_gpu_init(unsigned device, unsigned driver);
      void progpow_gpu_configure(uint32_t devicesCount);
      void progpow_gpu_compute(void* miner, const void* header, uint64_t height, int epoch, uint64_t boundary, uint64_t startNonce);
+diff --git a/pp_full/lib/libprogpow/ProgPow.cpp b/pp_full/lib/libprogpow/ProgPow.cpp
+index 23066b8..cbff87e 100644
+--- a/pp_full/lib/libprogpow/ProgPow.cpp
++++ b/pp_full/lib/libprogpow/ProgPow.cpp
+@@ -99,10 +99,21 @@ std::string ProgPow::getKern(uint64_t block_number, kernel_t kern)
+ 	{
+         ret << "typedef struct __attribute__ ((aligned (PROGPOW_DAG_LOADS * 4))) {uint32_t s[PROGPOW_DAG_LOADS];} dag_t;\n";
+         ret << "\n";
++        // IniAku: the DAG may be split over up to 4 buffers (NVIDIA OpenCL allows one buffer of only
++        // 1/4 of the VRAM). DAG_SPLIT / DAG_CHUNK (dag_t per buffer) come from CLMiner::init().
++        ret << "#ifndef DAG_SPLIT\n#define DAG_SPLIT 1\n#endif\n";
++        ret << "#if DAG_SPLIT > 1\n";
++        ret << "#define DAG_LOAD(i) ((i) < DAG_CHUNK ? g_dag0[(i)] : (i) < 2u * DAG_CHUNK ? g_dag1[(i) - DAG_CHUNK] : "
++               "(i) < 3u * DAG_CHUNK ? g_dag2[(i) - 2u * DAG_CHUNK] : g_dag3[(i) - 3u * DAG_CHUNK])\n";
++        ret << "#else\n#define DAG_LOAD(i) g_dag0[(i)]\n#endif\n";
++        ret << "\n";
+         ret << "// Inner loop for prog_seed " << prog_seed << "\n";
+         ret << "void progPowLoop(const uint32_t loop,\n";
+         ret << "        uint32_t mix[PROGPOW_REGS],\n";
+-        ret << "        __global const dag_t *g_dag,\n";
++        ret << "        __global const dag_t *g_dag0,\n";
++        ret << "        __global const dag_t *g_dag1,\n";
++        ret << "        __global const dag_t *g_dag2,\n";
++        ret << "        __global const dag_t *g_dag3,\n";
+         ret << "        __local const uint32_t *c_dag,\n";
+         ret << "        __local uint64_t *share,\n";
+         ret << "        const bool hack_false)\n";
+@@ -135,7 +146,10 @@ std::string ProgPow::getKern(uint64_t block_number, kernel_t kern)
+ 	}
+ 	ret << "offset %= PROGPOW_DAG_ELEMENTS;\n";
+ 	ret << "offset = offset * PROGPOW_LANES + (lane_id ^ loop) % PROGPOW_LANES;\n";
+-    ret << "data_dag = g_dag[offset];\n";
++    if (kern == KERNEL_CUDA)
++        ret << "data_dag = g_dag[offset];\n";
++    else
++        ret << "data_dag = DAG_LOAD(offset);\n";
+     ret << "// hack to prevent compiler from reordering LD and usage\n";
+     if (kern == KERNEL_CUDA)
+         ret << "if (hack_false) __threadfence_block();\n";
 diff --git a/pp_full/src/ffi.rs b/pp_full/src/ffi.rs
 index 8eeb68f..fb1167e 100644
 --- a/pp_full/src/ffi.rs

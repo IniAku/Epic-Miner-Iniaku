@@ -235,21 +235,20 @@ impl Miner for PpMiner {
 		                   * be returned. */
 	) -> Result<(), MinerError> {
 		let mut sd = self.shared_data.write().unwrap();
-		let mut paused = false;
 		if height != sd.height {
 			// stop/pause any existing jobs if job is for a new
 			// height
 			self.pause_solvers();
-			paused = true;
 		}
 		sd.job_id = job_id;
 		sd.height = height;
 		sd.pre_nonce = pre_nonce.to_owned();
 		sd.post_nonce = post_nonce.to_owned();
 		sd.difficulty = difficulty;
-		if paused {
-			self.resume_solvers();
-		}
+		// notify() only gets jobs of our own turn: always resume. Solvers paused by StopJob
+		// (other algorithm's turn, or a lost connection) used to stay paused when the next job
+		// had the same height, e.g. right after a reconnect, until the next block of our turn.
+		self.resume_solvers();
 		Ok(())
 	}
 

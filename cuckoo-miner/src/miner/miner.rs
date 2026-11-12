@@ -272,12 +272,10 @@ impl Miner for CuckooMiner {
 		                   * be returned. */
 	) -> Result<(), MinerError> {
 		let mut sd = self.shared_data.write().unwrap();
-		let mut paused = false;
 		if height != sd.height {
 			// stop/pause any existing jobs if job is for a new
 			// height
 			self.pause_solvers();
-			paused = true;
 			// solusi height lama tidak berlaku lagi
 			sd.solutions.clear();
 		}
@@ -286,9 +284,8 @@ impl Miner for CuckooMiner {
 		sd.pre_nonce = pre_nonce.to_owned();
 		sd.post_nonce = post_nonce.to_owned();
 		sd.difficulty = difficulty;
-		if paused {
-			self.resume_solvers();
-		}
+		// notify() only gets jobs of our own turn: always resume (see progpow-miner notify()).
+		self.resume_solvers();
 		Ok(())
 	}
 

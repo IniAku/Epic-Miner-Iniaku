@@ -211,6 +211,23 @@ impl Controller {
 	fn output_hashs_job_stats(&mut self, algo: Algorithm, stats: Vec<Stats>) {
 		let hashes_per_sec: u64 = stats.clone().iter().map(|s| s.hashes_per_sec).sum();
 
+		// Outside our turn the solvers are paused and their stats keep the last speed: show
+		// that we wait instead (like the Cuckoo lane). iniaku-miner parses this line.
+		let needed = self.stats.read().unwrap().client_stats.algorithm_needed.clone();
+		let mine = format!("{:?}", algo);
+		if !needed.is_empty() && needed != mine {
+			info!(
+				LOGGER,
+				"Waiting for {} turn (network is mining {} now)",
+				if mine == "ProgPow" { "ProgPoW".to_string() } else { mine.clone() },
+				needed
+			);
+			let mut s_stats = self.stats.write().unwrap();
+			s_stats.mining_stats.add_combined_gps(0.0);
+			s_stats.mining_stats.block_height = self.current_height;
+			return;
+		}
+
 		info!(
 			LOGGER,
 			"Mining: {:?} at {} hps (hashes per second)", algo, hashes_per_sec

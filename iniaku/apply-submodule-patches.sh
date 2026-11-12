@@ -8,8 +8,14 @@ apply() {
 	if git -C "$root/$dir" apply --check "$patch" 2>/dev/null; then
 		git -C "$root/$dir" apply "$patch"
 		echo "applied $patch"
+	elif git -C "$root/$dir" apply --reverse --check "$patch" 2>/dev/null; then
+		echo "skip $patch (already applied)"
 	else
-		echo "skip $patch (already applied or not applicable)"
+		# Dulu: "skip" diam-diam, lalu build gagal jauh kemudian dgn error yg menyesatkan
+		# (mis. "couldn't determine visual studio generator" di Windows, 2026-11-12).
+		echo "ERROR: $patch does not apply:" >&2
+		git -C "$root/$dir" apply --check "$patch" >&2 || true
+		exit 1
 	fi
 }
 apply randomx-rust "$root/patches/submodules/randomx-rust.patch"

@@ -71,7 +71,7 @@ index 6b8ce2c..22c65cf 100644
  configureProject()
  
 diff --git a/pp_full/lib/libethash-cl/CLMiner.cpp b/pp_full/lib/libethash-cl/CLMiner.cpp
-index cc46da4..a252b00 100644
+index cc46da4..b30c04c 100644
 --- a/pp_full/lib/libethash-cl/CLMiner.cpp
 +++ b/pp_full/lib/libethash-cl/CLMiner.cpp
 @@ -8,10 +8,12 @@
@@ -165,7 +165,7 @@ index cc46da4..a252b00 100644
  }
  
  }
-@@ -267,24 +330,107 @@ std::vector<cl::Device> getDevices(std::vector<cl::Platform> const& _platforms,
+@@ -267,24 +330,108 @@ std::vector<cl::Device> getDevices(std::vector<cl::Platform> const& _platforms,
  unsigned CLMiner::s_platformId = 0;
  unsigned CLMiner::s_numInstances = 0;
  vector<int> CLMiner::s_devices(MAX_MINERS, -1);
@@ -198,8 +198,8 @@ index cc46da4..a252b00 100644
 +		m_context = cl::Context();
 +	}
 +	catch (...) {}
- }
- 
++}
++
 +void CLMiner::deviceFailed(std::string const& reason)
 +{
 +	releaseResources();
@@ -217,8 +217,8 @@ index cc46da4..a252b00 100644
 +		std::_Exit(1);
 +	}
 +	std::cerr << "ProgPoW: other GPUs keep mining, GPU " << index << " retries in 5 minutes" << std::endl;
-+}
-+
+ }
+ 
 +void CLMiner::deviceRecovered()
 +{
 +	m_ready = true;
@@ -259,12 +259,13 @@ index cc46da4..a252b00 100644
  	current.startNonce = startNonce;
  
 -	if (current.height != height || current.epoch != epoch) {
-+	if (recovering || current.height != height || current.epoch != epoch) {
++	if (recovering || m_rebuild || current.height != height || current.epoch != epoch) {
  
  		uint64_t period_seed = height / PROGPOW_PERIOD;
  
 -		if (current.epoch != epoch || old_period_seed != period_seed){
-+		if (recovering || current.epoch != epoch || old_period_seed != period_seed){
++		if (recovering || m_rebuild || current.epoch != epoch || old_period_seed != period_seed){
++			m_rebuild = false;
  			// initialize dag for the epoch
 -			init(epoch, height);
 +			if (!init(epoch, height)) {
@@ -276,7 +277,7 @@ index cc46da4..a252b00 100644
  		}
  
  		current.height = height;
-@@ -297,7 +443,7 @@ void CLMiner::compute(const void* header, uint64_t height, int epoch, uint64_t t
+@@ -297,7 +444,7 @@ void CLMiner::compute(const void* header, uint64_t height, int epoch, uint64_t t
  		m_searchKernel.setArg(0, m_searchBuffer);
  
  		//set difficulty to kernel
@@ -285,7 +286,7 @@ index cc46da4..a252b00 100644
  	}
  
  	if (current.header != nullptr) {
-@@ -310,7 +456,7 @@ void CLMiner::compute(const void* header, uint64_t height, int epoch, uint64_t t
+@@ -310,7 +457,7 @@ void CLMiner::compute(const void* header, uint64_t height, int epoch, uint64_t t
  	m_queue.enqueueWriteBuffer(m_header, CL_FALSE, 0, current.header->size, current.header->data());
  
  	// set start nonce
@@ -294,29 +295,41 @@ index cc46da4..a252b00 100644
  
  	// run search kernel
  	m_queue.enqueueNDRangeKernel(m_searchKernel, cl::NullRange, m_globalWorkSize, m_workgroupSize);
-@@ -323,16 +469,26 @@ bool CLMiner::get_solutions(void* data)
+@@ -318,21 +465,38 @@ void CLMiner::compute(const void* header, uint64_t height, int epoch, uint64_t t
+ 	m_queue.finish();
+ }
+ 
++void CLMiner::set_safe_mode(int level)
++{
++	m_safeMode = level;
++	m_safePeriod = old_period_seed;
++	m_rebuild = true;
++}
++
+ bool CLMiner::get_solutions(void* data)
+ {
  	uint32_t const c_zero = 0;
  	uint32_t results[c_maxSearchResults + 9];
  
 -	m_queue.enqueueReadBuffer(m_searchBuffer, CL_TRUE, 0, sizeof(results), &results);
 +	if (!m_ready)
 +		return false;
- 
--	if (results[0] > 0) {
--		uint64_t nonce = current.startNonce + results[1];
++
 +	try
 +	{
 +		m_queue.enqueueReadBuffer(m_searchBuffer, CL_TRUE, 0, sizeof(results), &results);
  
--		m_queue.enqueueWriteBuffer(m_searchBuffer, CL_FALSE, 0, sizeof(c_zero), &c_zero);
+-	if (results[0] > 0) {
+-		uint64_t nonce = current.startNonce + results[1];
 +		if (results[0] > 0) {
 +			uint64_t nonce = current.startNonce + results[1];
+ 
+-		m_queue.enqueueWriteBuffer(m_searchBuffer, CL_FALSE, 0, sizeof(c_zero), &c_zero);
++			m_queue.enqueueWriteBuffer(m_searchBuffer, CL_FALSE, 0, sizeof(c_zero), &c_zero);
  
 -		memcpy((uint8_t*)data, &nonce, sizeof(uint64_t));
 -		memcpy(((uint8_t*)data) + sizeof(uint64_t), results + 2, sizeof(uint32_t) * 8);
 -		return true;
-+			m_queue.enqueueWriteBuffer(m_searchBuffer, CL_FALSE, 0, sizeof(c_zero), &c_zero);
-+
 +			memcpy((uint8_t*)data, &nonce, sizeof(uint64_t));
 +			memcpy(((uint8_t*)data) + sizeof(uint64_t), results + 2, sizeof(uint32_t) * 8);
 +			return true;
@@ -328,7 +341,7 @@ index cc46da4..a252b00 100644
  	}
  
  	return false;
-@@ -363,8 +519,6 @@ bool CLMiner::configureGPU(
+@@ -363,8 +527,6 @@ bool CLMiner::configureGPU(
  	bool _exit
  )
  {
@@ -337,7 +350,7 @@ index cc46da4..a252b00 100644
  	_localWorkSize = ((_localWorkSize + 7) / 8) * 8;
  	s_workgroupSize = _localWorkSize;
  	s_initialGlobalWorkSize = _globalWorkSizeMultiplier * _localWorkSize;
-@@ -375,10 +529,18 @@ bool CLMiner::configureGPU(
+@@ -375,10 +537,18 @@ bool CLMiner::configureGPU(
  	vector<cl::Platform> platforms = getPlatforms();
  	if (platforms.empty())
  		return false;
@@ -358,7 +371,7 @@ index cc46da4..a252b00 100644
  	for (auto const& device: devices)
  	{
  		cl_ulong result = 0;
-@@ -403,6 +565,9 @@ bool CLMiner::configureGPU(
+@@ -403,6 +573,9 @@ bool CLMiner::configureGPU(
  
  bool CLMiner::init(int epoch, uint64_t block_number)
  {
@@ -368,7 +381,7 @@ index cc46da4..a252b00 100644
  	EthashAux::LightType light = EthashAux::light(epoch);
  
  	// get all platforms
-@@ -452,9 +617,13 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+@@ -452,9 +625,13 @@ bool CLMiner::init(int epoch, uint64_t block_number)
  			return false;
  		}
  
@@ -383,10 +396,18 @@ index cc46da4..a252b00 100644
  		//m_hwmoninfo.deviceIndex = deviceId % devices.size();
  		cl::Device& device = devices[deviceId % devices.size()];
  		string device_version = device.getInfo<CL_DEVICE_VERSION>();
-@@ -488,6 +657,13 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+@@ -488,6 +665,21 @@ bool CLMiner::init(int epoch, uint64_t block_number)
  		} else {
  			sprintf(options, "%s", "");
  		}
++		int safeMode = (block_number / PROGPOW_PERIOD == m_safePeriod) ? m_safeMode : 0;
++		if (safeMode >= 1)
++		{
++			size_t used = strlen(options);
++			snprintf(options + used, sizeof(options) - used, "%s-cl-opt-disable", used ? " " : "");
++			std::cerr << "ProgPoW: GPU " << index << " safe mode " << safeMode << " for period "
++				<< block_number / PROGPOW_PERIOD << std::endl;
++		}
 +		// INIAKU_PP_CLOPTS: extra OpenCL build options for testing (e.g. -cl-opt-disable).
 +		if (const char* extra = std::getenv("INIAKU_PP_CLOPTS"))
 +		{
@@ -397,7 +418,7 @@ index cc46da4..a252b00 100644
  
  		// create context
  		m_context = cl::Context(vector<cl::Device>(&device, &device + 1));
-@@ -501,6 +677,34 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+@@ -501,13 +693,41 @@ bool CLMiner::init(int epoch, uint64_t block_number)
  
  		uint64_t dagBytes = ethash_get_datasize(light->light->block_number);
  		uint32_t dagElms = (unsigned)(dagBytes / (PROGPOW_LANES * PROGPOW_DAG_LOADS * 4));
@@ -432,7 +453,15 @@ index cc46da4..a252b00 100644
  		uint32_t lightWords = (unsigned)(light->data().size() / sizeof(node));
  
  		// patch source code
-@@ -517,6 +721,8 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+ 		// note: The kernels here are simply compiled version of the respective .cl kernels
+ 		// into a byte array by bin2h.cmake. There is no need to load the file by hand in runtime
+ 		// See libethash-cl/CMakeLists.txt: add_custom_command()
+-		std::string code = ProgPow::getKern(block_number, ProgPow::KERNEL_CL);
++		std::string code = ProgPow::getKern(block_number, ProgPow::KERNEL_CL, safeMode >= 2);
+ 		code += string(CLMiner_kernel, sizeof(CLMiner_kernel));
+ 
+ 		addDefinition(code, "GROUP_SIZE", m_workgroupSize);
+@@ -517,6 +737,8 @@ bool CLMiner::init(int epoch, uint64_t block_number)
  		addDefinition(code, "MAX_OUTPUTS", c_maxSearchResults);
  		addDefinition(code, "PLATFORM", platformId);
  		addDefinition(code, "COMPUTE", computeCapability);
@@ -441,7 +470,7 @@ index cc46da4..a252b00 100644
  
          /*ofstream out;
          out.open("kernel.cl");
-@@ -555,7 +761,11 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+@@ -555,7 +777,11 @@ bool CLMiner::init(int epoch, uint64_t block_number)
  			//cllog << "Creating light cache buffer, size" << light->data().size();
  			m_light = cl::Buffer(m_context, CL_MEM_READ_ONLY, light->data().size());
  			//cllog << "Creating DAG buffer, size" << dagBytes;
@@ -454,7 +483,7 @@ index cc46da4..a252b00 100644
  			//cllog << "Loading kernels";
  			m_searchKernel = cl::Kernel(program, "ethash_search");
  			m_dagKernel = cl::Kernel(program, "ethash_calculate_dag_item");
-@@ -572,8 +782,10 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+@@ -572,8 +798,10 @@ bool CLMiner::init(int epoch, uint64_t block_number)
  		m_header = cl::Buffer(m_context, CL_MEM_READ_ONLY, 32);
  
  		m_searchKernel.setArg(1, m_header);
@@ -467,7 +496,7 @@ index cc46da4..a252b00 100644
  
  		// create mining buffers
  		//ETHCL_LOG("Creating mining buffer");
-@@ -585,15 +797,23 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+@@ -585,15 +813,23 @@ bool CLMiner::init(int epoch, uint64_t block_number)
  		if (restWork > 0) fullRuns++;
  
  		m_dagKernel.setArg(1, m_light);
@@ -497,7 +526,7 @@ index cc46da4..a252b00 100644
  		auto endDAG = std::chrono::steady_clock::now();
  
 diff --git a/pp_full/lib/libethash-cl/CLMiner.h b/pp_full/lib/libethash-cl/CLMiner.h
-index 1384c02..c9adcc0 100644
+index 1384c02..c3b3fd0 100644
 --- a/pp_full/lib/libethash-cl/CLMiner.h
 +++ b/pp_full/lib/libethash-cl/CLMiner.h
 @@ -6,6 +6,9 @@
@@ -510,11 +539,12 @@ index 1384c02..c9adcc0 100644
  #include <libprogpow/ProgPow.h>
  #include <libdevcore/Worker.h>
  #include <libethcore/EthashAux.h>
-@@ -93,13 +96,26 @@ public:
+@@ -93,13 +96,30 @@ public:
  
  	void compute(const void* header, uint64_t height, int epoch, uint64_t target, uint64_t startNonce);
  	bool get_solutions(void* data);
 +	bool ready() { return m_ready; }
++	void set_safe_mode(int level);
  
  private:
 +	void computeWork(const void* header, uint64_t height, int epoch, uint64_t target, uint64_t startNonce);
@@ -523,6 +553,9 @@ index 1384c02..c9adcc0 100644
 +	void deviceRecovered();
 +
 +	bool m_ready = false;
++	int m_safeMode = 0;
++	uint64_t m_safePeriod = (uint64_t)-1;
++	bool m_rebuild = false;
 +	bool m_countedFailed = false;
 +	std::chrono::steady_clock::time_point m_retryAt;
 +	static std::atomic<unsigned> s_created;
@@ -628,15 +661,19 @@ index 4144339..cd18977 100644
  unsigned CUDAMiner::s_numInstances = 0;
  
 diff --git a/pp_full/lib/libethcore/miner.h b/pp_full/lib/libethcore/miner.h
-index 5774dc5..f1af9ca 100644
+index 5774dc5..78f99d3 100644
 --- a/pp_full/lib/libethcore/miner.h
 +++ b/pp_full/lib/libethcore/miner.h
-@@ -6,4 +6,6 @@ class Miner{
+@@ -6,4 +6,10 @@ class Miner{
  public:
      virtual void compute(const void* header, uint64_t height, int epoch, uint64_t target, uint64_t startNonce) = 0;
      virtual bool get_solutions(void* data) = 0;
 +    // false while this GPU cannot mine (for example its DAG could not be built)
 +    virtual bool ready() { return true; }
++    // Safe mode for the current ProgPoW period after GPU results failed the CPU check:
++    // 0 = normal, 1 = OpenCL compiler optimizations off, 2 = also an extra barrier.
++    // The kernel is rebuilt on the next compute; the next period starts in normal mode.
++    virtual void set_safe_mode(int level) {}
  };
 diff --git a/pp_full/lib/libexternal/CMakeLists.txt b/pp_full/lib/libexternal/CMakeLists.txt
 index 76b5c73..dcf0ccc 100644
@@ -653,7 +690,7 @@ index 76b5c73..dcf0ccc 100644
  if(ETHASHCUDA)
  	target_link_libraries(ppow ethash-cuda)
 diff --git a/pp_full/lib/libexternal/progpow.cpp b/pp_full/lib/libexternal/progpow.cpp
-index a30d60d..252435f 100644
+index a30d60d..11625ce 100644
 --- a/pp_full/lib/libexternal/progpow.cpp
 +++ b/pp_full/lib/libexternal/progpow.cpp
 @@ -3,7 +3,7 @@
@@ -687,7 +724,7 @@ index a30d60d..252435f 100644
  
          CUDAMiner::setParallelHash(m_parallelHash);
          #endif
-@@ -121,6 +127,14 @@ extern "C" {
+@@ -121,6 +127,19 @@ extern "C" {
          return ((Miner*) miner)->compute(header, height, epoch, boundary, startNonce);
      }
  
@@ -699,23 +736,29 @@ index a30d60d..252435f 100644
 +        return ((Miner*) miner)->ready();
 +    }
 +
++    void progpow_gpu_set_safe_mode(void* miner, int level) {
++        if (miner != NULL)
++            ((Miner*) miner)->set_safe_mode(level);
++    }
++
      bool progpow_gpu_get_solutions(void* miner, void* data) {
          if (miner == NULL){
              exit(1);
 diff --git a/pp_full/lib/libexternal/progpow.h b/pp_full/lib/libexternal/progpow.h
-index 0fbd12d..6e4338c 100644
+index 0fbd12d..8667022 100644
 --- a/pp_full/lib/libexternal/progpow.h
 +++ b/pp_full/lib/libexternal/progpow.h
-@@ -15,6 +15,7 @@
+@@ -15,6 +15,8 @@
  extern "C" {
  #endif
      bool progpow_destroy(void* miner);
 +    bool progpow_gpu_ready(void* miner);
++    void progpow_gpu_set_safe_mode(void* miner, int level);
      void* progpow_gpu_init(unsigned device, unsigned driver);
      void progpow_gpu_configure(uint32_t devicesCount);
      void progpow_gpu_compute(void* miner, const void* header, uint64_t height, int epoch, uint64_t boundary, uint64_t startNonce);
 diff --git a/pp_full/lib/libprogpow/ProgPow.cpp b/pp_full/lib/libprogpow/ProgPow.cpp
-index 23066b8..88c37d1 100644
+index 23066b8..969a587 100644
 --- a/pp_full/lib/libprogpow/ProgPow.cpp
 +++ b/pp_full/lib/libprogpow/ProgPow.cpp
 @@ -1,6 +1,7 @@
@@ -726,6 +769,15 @@ index 23066b8..88c37d1 100644
  
  #define rnd() (kiss99(rnd_state))
  #define mix_src()   ("mix[" + std::to_string(rnd() % PROGPOW_REGS) + "]")
+@@ -14,7 +15,7 @@ void swap(int &a, int &b)
+     b = t;
+ }
+ 
+-std::string ProgPow::getKern(uint64_t block_number, kernel_t kern)
++std::string ProgPow::getKern(uint64_t block_number, kernel_t kern, bool extraBarrier)
+ {
+     std::stringstream ret;
+ 
 @@ -99,10 +100,21 @@ std::string ProgPow::getKern(uint64_t block_number, kernel_t kern)
  	{
          ret << "typedef struct __attribute__ ((aligned (PROGPOW_DAG_LOADS * 4))) {uint32_t s[PROGPOW_DAG_LOADS];} dag_t;\n";
@@ -755,7 +807,7 @@ index 23066b8..88c37d1 100644
  		ret << "offset = share[group_id];\n";
 +		// INIAKU_PP_BARRIER2=1: every lane has read share[] before the next loop writes it.
 +		const char* b2 = std::getenv("INIAKU_PP_BARRIER2");
-+		if (b2 && b2[0] == '1')
++		if (extraBarrier || (b2 && b2[0] == '1'))
 +			ret << "barrier(CLK_LOCAL_MEM_FENCE);\n";
  	}
  	ret << "offset %= PROGPOW_DAG_ELEMENTS;\n";
@@ -768,11 +820,24 @@ index 23066b8..88c37d1 100644
      ret << "// hack to prevent compiler from reordering LD and usage\n";
      if (kern == KERNEL_CUDA)
          ret << "if (hack_false) __threadfence_block();\n";
+diff --git a/pp_full/lib/libprogpow/ProgPow.h b/pp_full/lib/libprogpow/ProgPow.h
+index afb5553..2d9c2bd 100644
+--- a/pp_full/lib/libprogpow/ProgPow.h
++++ b/pp_full/lib/libprogpow/ProgPow.h
+@@ -29,7 +29,7 @@ public:
+         KERNEL_CL
+     } kernel_t;
+ 
+-    static std::string getKern(uint64_t seed, kernel_t kern);
++    static std::string getKern(uint64_t seed, kernel_t kern, bool extraBarrier = false);
+ 
+ private:
+     static std::string math(std::string d, std::string a, std::string b, uint32_t r);
 diff --git a/pp_full/src/ffi.rs b/pp_full/src/ffi.rs
-index 8eeb68f..fb1167e 100644
+index 8eeb68f..eb7c3d4 100644
 --- a/pp_full/src/ffi.rs
 +++ b/pp_full/src/ffi.rs
-@@ -17,6 +17,10 @@ extern "C" {
+@@ -17,6 +17,14 @@ extern "C" {
  	);
  }
  
@@ -780,14 +845,18 @@ index 8eeb68f..fb1167e 100644
 +	pub fn progpow_gpu_ready(miner: *mut ::std::os::raw::c_void) -> bool;
 +}
 +
++extern "C" {
++	pub fn progpow_gpu_set_safe_mode(miner: *mut ::std::os::raw::c_void, level: i32);
++}
++
  extern "C" {
  	pub fn progpow_destroy(miner: *mut ::std::os::raw::c_void) -> bool;
  }
 diff --git a/pp_full/src/types.rs b/pp_full/src/types.rs
-index b5219b0..0c3669b 100644
+index b5219b0..d1623c8 100644
 --- a/pp_full/src/types.rs
 +++ b/pp_full/src/types.rs
-@@ -77,6 +77,14 @@ impl GPU {
+@@ -77,6 +77,21 @@ impl GPU {
  		Ok(())
  	}
  
@@ -799,19 +868,32 @@ index b5219b0..0c3669b 100644
 +		}
 +	}
 +
++	/// Rebuild this period's kernel in a safe mode (see Miner::set_safe_mode).
++	pub fn set_safe_mode(&self, level: i32) {
++		if let Some(miner) = self.miner {
++			unsafe { progpow_gpu_set_safe_mode(miner, level) }
++		}
++	}
++
  	pub fn solutions(&self) -> Result<Option<(u64, [u8; 32])>, &str> {
  		if let None = self.miner {
  			return Err(MINER_UNINITIALIZED);
 diff --git a/src/hardware/gpu.rs b/src/hardware/gpu.rs
-index 60d7926..e77cc21 100644
+index 60d7926..6e1dfe1 100644
 --- a/src/hardware/gpu.rs
 +++ b/src/hardware/gpu.rs
-@@ -17,6 +17,10 @@ impl PpGPU {
+@@ -17,6 +17,16 @@ impl PpGPU {
  		self.gpu.compute(header, height, epoch, target, start_nonce);
  	}
  
 +	pub fn ready(&self) -> bool {
 +		self.gpu.ready()
++	}
++
++	/// After GPU results failed the CPU check: rebuild this period's kernel in a safe mode
++	/// (1 = OpenCL optimizations off, 2 = also an extra barrier). No effect on CUDA.
++	pub fn set_safe_mode(&self, level: i32) {
++		self.gpu.set_safe_mode(level);
 +	}
 +
  	pub fn get_solutions(&self) -> Option<(u64, [u8; 32])> {

@@ -71,7 +71,7 @@ index 6b8ce2c..22c65cf 100644
  configureProject()
  
 diff --git a/pp_full/lib/libethash-cl/CLMiner.cpp b/pp_full/lib/libethash-cl/CLMiner.cpp
-index cc46da4..b30c04c 100644
+index cc46da4..2f14910 100644
 --- a/pp_full/lib/libethash-cl/CLMiner.cpp
 +++ b/pp_full/lib/libethash-cl/CLMiner.cpp
 @@ -8,10 +8,12 @@
@@ -401,7 +401,7 @@ index cc46da4..b30c04c 100644
  			sprintf(options, "%s", "");
  		}
 +		int safeMode = (block_number / PROGPOW_PERIOD == m_safePeriod) ? m_safeMode : 0;
-+		if (safeMode >= 1)
++		if (safeMode >= 2)
 +		{
 +			size_t used = strlen(options);
 +			snprintf(options + used, sizeof(options) - used, "%s-cl-opt-disable", used ? " " : "");
@@ -418,7 +418,7 @@ index cc46da4..b30c04c 100644
  
  		// create context
  		m_context = cl::Context(vector<cl::Device>(&device, &device + 1));
-@@ -501,13 +693,41 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+@@ -501,13 +693,43 @@ bool CLMiner::init(int epoch, uint64_t block_number)
  
  		uint64_t dagBytes = ethash_get_datasize(light->light->block_number);
  		uint32_t dagElms = (unsigned)(dagBytes / (PROGPOW_LANES * PROGPOW_DAG_LOADS * 4));
@@ -457,11 +457,13 @@ index cc46da4..b30c04c 100644
  		// into a byte array by bin2h.cmake. There is no need to load the file by hand in runtime
  		// See libethash-cl/CMakeLists.txt: add_custom_command()
 -		std::string code = ProgPow::getKern(block_number, ProgPow::KERNEL_CL);
-+		std::string code = ProgPow::getKern(block_number, ProgPow::KERNEL_CL, safeMode >= 2);
++		if (safeMode == 1)
++			std::cerr << "ProgPoW: GPU " << index << " safe mode 1 for period " << block_number / PROGPOW_PERIOD << std::endl;
++		std::string code = ProgPow::getKern(block_number, ProgPow::KERNEL_CL, safeMode >= 1);
  		code += string(CLMiner_kernel, sizeof(CLMiner_kernel));
  
  		addDefinition(code, "GROUP_SIZE", m_workgroupSize);
-@@ -517,6 +737,8 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+@@ -517,6 +739,8 @@ bool CLMiner::init(int epoch, uint64_t block_number)
  		addDefinition(code, "MAX_OUTPUTS", c_maxSearchResults);
  		addDefinition(code, "PLATFORM", platformId);
  		addDefinition(code, "COMPUTE", computeCapability);
@@ -470,7 +472,7 @@ index cc46da4..b30c04c 100644
  
          /*ofstream out;
          out.open("kernel.cl");
-@@ -555,7 +777,11 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+@@ -555,7 +779,11 @@ bool CLMiner::init(int epoch, uint64_t block_number)
  			//cllog << "Creating light cache buffer, size" << light->data().size();
  			m_light = cl::Buffer(m_context, CL_MEM_READ_ONLY, light->data().size());
  			//cllog << "Creating DAG buffer, size" << dagBytes;
@@ -483,7 +485,7 @@ index cc46da4..b30c04c 100644
  			//cllog << "Loading kernels";
  			m_searchKernel = cl::Kernel(program, "ethash_search");
  			m_dagKernel = cl::Kernel(program, "ethash_calculate_dag_item");
-@@ -572,8 +798,10 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+@@ -572,8 +800,10 @@ bool CLMiner::init(int epoch, uint64_t block_number)
  		m_header = cl::Buffer(m_context, CL_MEM_READ_ONLY, 32);
  
  		m_searchKernel.setArg(1, m_header);
@@ -496,7 +498,7 @@ index cc46da4..b30c04c 100644
  
  		// create mining buffers
  		//ETHCL_LOG("Creating mining buffer");
-@@ -585,15 +813,23 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+@@ -585,15 +815,23 @@ bool CLMiner::init(int epoch, uint64_t block_number)
  		if (restWork > 0) fullRuns++;
  
  		m_dagKernel.setArg(1, m_light);
@@ -661,17 +663,18 @@ index 4144339..cd18977 100644
  unsigned CUDAMiner::s_numInstances = 0;
  
 diff --git a/pp_full/lib/libethcore/miner.h b/pp_full/lib/libethcore/miner.h
-index 5774dc5..78f99d3 100644
+index 5774dc5..3dca04e 100644
 --- a/pp_full/lib/libethcore/miner.h
 +++ b/pp_full/lib/libethcore/miner.h
-@@ -6,4 +6,10 @@ class Miner{
+@@ -6,4 +6,11 @@ class Miner{
  public:
      virtual void compute(const void* header, uint64_t height, int epoch, uint64_t target, uint64_t startNonce) = 0;
      virtual bool get_solutions(void* data) = 0;
 +    // false while this GPU cannot mine (for example its DAG could not be built)
 +    virtual bool ready() { return true; }
 +    // Safe mode for the current ProgPoW period after GPU results failed the CPU check:
-+    // 0 = normal, 1 = OpenCL compiler optimizations off, 2 = also an extra barrier.
++    // 0 = normal, 1 = extra barrier (full speed), 2 = also OpenCL compiler optimizations off
++    // (last resort: about 2% of normal speed on an RTX 4070 SUPER).
 +    // The kernel is rebuilt on the next compute; the next period starts in normal mode.
 +    virtual void set_safe_mode(int level) {}
  };
@@ -879,7 +882,7 @@ index b5219b0..d1623c8 100644
  		if let None = self.miner {
  			return Err(MINER_UNINITIALIZED);
 diff --git a/src/hardware/gpu.rs b/src/hardware/gpu.rs
-index 60d7926..6e1dfe1 100644
+index 60d7926..9df599d 100644
 --- a/src/hardware/gpu.rs
 +++ b/src/hardware/gpu.rs
 @@ -17,6 +17,16 @@ impl PpGPU {
@@ -891,7 +894,7 @@ index 60d7926..6e1dfe1 100644
 +	}
 +
 +	/// After GPU results failed the CPU check: rebuild this period's kernel in a safe mode
-+	/// (1 = OpenCL optimizations off, 2 = also an extra barrier). No effect on CUDA.
++	/// (1 = extra barrier, 2 = also OpenCL optimizations off). No effect on CUDA.
 +	pub fn set_safe_mode(&self, level: i32) {
 +		self.gpu.set_safe_mode(level);
 +	}

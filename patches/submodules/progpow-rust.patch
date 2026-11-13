@@ -701,10 +701,18 @@ index 0fbd12d..6e4338c 100644
      void progpow_gpu_configure(uint32_t devicesCount);
      void progpow_gpu_compute(void* miner, const void* header, uint64_t height, int epoch, uint64_t boundary, uint64_t startNonce);
 diff --git a/pp_full/lib/libprogpow/ProgPow.cpp b/pp_full/lib/libprogpow/ProgPow.cpp
-index 23066b8..cbff87e 100644
+index 23066b8..88c37d1 100644
 --- a/pp_full/lib/libprogpow/ProgPow.cpp
 +++ b/pp_full/lib/libprogpow/ProgPow.cpp
-@@ -99,10 +99,21 @@ std::string ProgPow::getKern(uint64_t block_number, kernel_t kern)
+@@ -1,6 +1,7 @@
+ #include "ProgPow.h"
+ 
+ #include <sstream>
++#include <cstdlib>
+ 
+ #define rnd() (kiss99(rnd_state))
+ #define mix_src()   ("mix[" + std::to_string(rnd() % PROGPOW_REGS) + "]")
+@@ -99,10 +100,21 @@ std::string ProgPow::getKern(uint64_t block_number, kernel_t kern)
  	{
          ret << "typedef struct __attribute__ ((aligned (PROGPOW_DAG_LOADS * 4))) {uint32_t s[PROGPOW_DAG_LOADS];} dag_t;\n";
          ret << "\n";
@@ -727,7 +735,14 @@ index 23066b8..cbff87e 100644
          ret << "        __local const uint32_t *c_dag,\n";
          ret << "        __local uint64_t *share,\n";
          ret << "        const bool hack_false)\n";
-@@ -135,7 +146,10 @@ std::string ProgPow::getKern(uint64_t block_number, kernel_t kern)
+@@ -132,10 +144,17 @@ std::string ProgPow::getKern(uint64_t block_number, kernel_t kern)
+ 		ret << "    share[group_id] = mix[0];\n";
+ 		ret << "barrier(CLK_LOCAL_MEM_FENCE);\n";
+ 		ret << "offset = share[group_id];\n";
++		// INIAKU_PP_BARRIER2=1: every lane has read share[] before the next loop writes it.
++		const char* b2 = std::getenv("INIAKU_PP_BARRIER2");
++		if (b2 && b2[0] == '1')
++			ret << "barrier(CLK_LOCAL_MEM_FENCE);\n";
  	}
  	ret << "offset %= PROGPOW_DAG_ELEMENTS;\n";
  	ret << "offset = offset * PROGPOW_LANES + (lane_id ^ loop) % PROGPOW_LANES;\n";

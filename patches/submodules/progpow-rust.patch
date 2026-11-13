@@ -71,7 +71,7 @@ index 6b8ce2c..22c65cf 100644
  configureProject()
  
 diff --git a/pp_full/lib/libethash-cl/CLMiner.cpp b/pp_full/lib/libethash-cl/CLMiner.cpp
-index cc46da4..2c38524 100644
+index cc46da4..a252b00 100644
 --- a/pp_full/lib/libethash-cl/CLMiner.cpp
 +++ b/pp_full/lib/libethash-cl/CLMiner.cpp
 @@ -8,10 +8,12 @@
@@ -175,8 +175,8 @@ index cc46da4..2c38524 100644
  CLMiner::CLMiner(unsigned _index): current(0,0,-1,0) {
  	index = _index;
 +	++s_created;
- }
- 
++}
++
 +// Frees everything that holds GPU memory. Never throws: it also runs after a failure.
 +void CLMiner::releaseResources()
 +{
@@ -198,8 +198,8 @@ index cc46da4..2c38524 100644
 +		m_context = cl::Context();
 +	}
 +	catch (...) {}
-+}
-+
+ }
+ 
 +void CLMiner::deviceFailed(std::string const& reason)
 +{
 +	releaseResources();
@@ -383,7 +383,21 @@ index cc46da4..2c38524 100644
  		//m_hwmoninfo.deviceIndex = deviceId % devices.size();
  		cl::Device& device = devices[deviceId % devices.size()];
  		string device_version = device.getInfo<CL_DEVICE_VERSION>();
-@@ -501,6 +670,34 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+@@ -488,6 +657,13 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+ 		} else {
+ 			sprintf(options, "%s", "");
+ 		}
++		// INIAKU_PP_CLOPTS: extra OpenCL build options for testing (e.g. -cl-opt-disable).
++		if (const char* extra = std::getenv("INIAKU_PP_CLOPTS"))
++		{
++			size_t used = strlen(options);
++			snprintf(options + used, sizeof(options) - used, "%s%s", used ? " " : "", extra);
++			std::cerr << "ProgPoW: OpenCL build options \"" << options << "\"" << std::endl;
++		}
+ 
+ 		// create context
+ 		m_context = cl::Context(vector<cl::Device>(&device, &device + 1));
+@@ -501,6 +677,34 @@ bool CLMiner::init(int epoch, uint64_t block_number)
  
  		uint64_t dagBytes = ethash_get_datasize(light->light->block_number);
  		uint32_t dagElms = (unsigned)(dagBytes / (PROGPOW_LANES * PROGPOW_DAG_LOADS * 4));
@@ -418,7 +432,7 @@ index cc46da4..2c38524 100644
  		uint32_t lightWords = (unsigned)(light->data().size() / sizeof(node));
  
  		// patch source code
-@@ -517,6 +714,8 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+@@ -517,6 +721,8 @@ bool CLMiner::init(int epoch, uint64_t block_number)
  		addDefinition(code, "MAX_OUTPUTS", c_maxSearchResults);
  		addDefinition(code, "PLATFORM", platformId);
  		addDefinition(code, "COMPUTE", computeCapability);
@@ -427,7 +441,7 @@ index cc46da4..2c38524 100644
  
          /*ofstream out;
          out.open("kernel.cl");
-@@ -555,7 +754,11 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+@@ -555,7 +761,11 @@ bool CLMiner::init(int epoch, uint64_t block_number)
  			//cllog << "Creating light cache buffer, size" << light->data().size();
  			m_light = cl::Buffer(m_context, CL_MEM_READ_ONLY, light->data().size());
  			//cllog << "Creating DAG buffer, size" << dagBytes;
@@ -440,7 +454,7 @@ index cc46da4..2c38524 100644
  			//cllog << "Loading kernels";
  			m_searchKernel = cl::Kernel(program, "ethash_search");
  			m_dagKernel = cl::Kernel(program, "ethash_calculate_dag_item");
-@@ -572,8 +775,10 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+@@ -572,8 +782,10 @@ bool CLMiner::init(int epoch, uint64_t block_number)
  		m_header = cl::Buffer(m_context, CL_MEM_READ_ONLY, 32);
  
  		m_searchKernel.setArg(1, m_header);
@@ -453,7 +467,7 @@ index cc46da4..2c38524 100644
  
  		// create mining buffers
  		//ETHCL_LOG("Creating mining buffer");
-@@ -585,15 +790,23 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+@@ -585,15 +797,23 @@ bool CLMiner::init(int epoch, uint64_t block_number)
  		if (restWork > 0) fullRuns++;
  
  		m_dagKernel.setArg(1, m_light);

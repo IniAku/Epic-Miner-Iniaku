@@ -1,0 +1,59 @@
+# ProgPoW GPU self-test tool (tools/ppcheck), Windows OpenCL. Manual or on the ppcheck branch.
+name: ppcheck
+
+on:
+  push:
+    branches: [ppcheck]
+  workflow_dispatch:
+
+env:
+  CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+
+jobs:
+  ppcheck-windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Submodule patches
+        shell: bash
+        run: iniaku/apply-submodule-patches.sh
+      # ProgPoW (progpow-rust/pp_full, C++): Boost from vcpkg (static, /MT) instead of Hunter.
+      - name: Boost (vcpkg)
+        shell: pwsh
+        run: |
+          # Downloads from github.com can fail with 503/504; finished downloads are kept between attempts.
+          $ok = $false
+          for ($i = 1; $i -le 10 -and -not $ok; $i++) {
+            & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install boost-system:x64-windows-static boost-algorithm:x64-windows-static boost-exception:x64-windows-static boost-functional:x64-windows-static boost-multiprecision:x64-windows-static boost-throw-exception:x64-windows-static
+            if ($LASTEXITCODE -eq 0) { $ok = $true } elseif ($i -lt 10) { Write-Host "vcpkg attempt $i failed, retrying in 60 s"; Start-Sleep -Seconds 60 }
+          }
+          if (-not $ok) { exit 1 }
+          $root = $env:VCPKG_INSTALLATION_ROOT -replace '\\','/'
+          "CMAKE_TOOLCHAIN_FILE=$root/scripts/buildsystems/vcpkg.cmake" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VCPKG_TARGET_TRIPLET=x64-windows-static" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "LIBCLANG_PATH=C:/Program Files/LLVM/bin" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "PROGPOW_CMAKE_GENERATOR=Visual Studio 17 2022" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: OpenCL SDK (OpenCL.lib)
+        shell: pwsh
+        run: |
+          $url = "https://github.com/KhronosGroup/OpenCL-SDK/releases/download/v2023.12.14/OpenCL-SDK-v2023.12.14-Win-x64.zip"
+          Invoke-WebRequest $url -OutFile ocl.zip
+          Expand-Archive ocl.zip -DestinationPath C:\ocl
+          $lib = (Get-ChildItem C:\ocl -Recurse -Filter OpenCL.lib | Select-Object -First 1).DirectoryName
+          "OCL_LIB_DIR=$lib" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $inc = (Get-ChildItem C:\ocl -Recurse -Filter cl.h | Where-Object { $_.Directory.Name -eq 'CL' } | Select-Object -First 1).Directory.Parent.FullName
+          "OpenCL_INCLUDE_DIR=$($inc -replace '\\','/')" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "OpenCL_LIBRARY=$((Join-Path $lib 'OpenCL.lib') -replace '\\','/')" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        shell: bash
+        run: |
+          export RUSTFLAGS="-L native=$OCL_LIB_DIR -C target-feature=+crt-static"
+          cargo build --release --manifest-path tools/ppcheck/Cargo.toml --features opencl
+          mkdir -p out && cp tools/ppcheck/target/release/ppcheck.exe out/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ppcheck-windows
+          path: out/ppcheck.exe

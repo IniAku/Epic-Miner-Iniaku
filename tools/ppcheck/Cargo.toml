@@ -1,0 +1,15 @@
+# ProgPoW GPU self-test (GPU solutions checked by the CPU light verifier). Not part of the release.
+[package]
+name = "ppcheck"
+version = "0.1.0"
+edition = "2018"
+
+[workspace]
+
+[dependencies]
+bigint = "4.4.1"
+progpow = { path = "../../progpow-rust", default-features = false }
+
+[features]
+opencl = ["progpow/opencl"]
+cuda = ["progpow/cuda"]

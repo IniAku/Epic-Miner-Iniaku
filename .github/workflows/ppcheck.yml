@@ -52,8 +52,8 @@ jobs:
         run: |
           export RUSTFLAGS="-L native=$OCL_LIB_DIR -C target-feature=+crt-static"
           cargo build --release --manifest-path tools/ppcheck/Cargo.toml --features opencl
-          mkdir -p out && cp tools/ppcheck/target/release/ppcheck.exe out/
+          mkdir -p out/iniaku-ppcheck && cp tools/ppcheck/target/release/ppcheck.exe tools/ppcheck/run-ppcheck.bat out/iniaku-ppcheck/
       - uses: actions/upload-artifact@v4
         with:
           name: ppcheck-windows
-          path: out/ppcheck.exe
+          path: out/

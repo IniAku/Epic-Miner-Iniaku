@@ -2,7 +2,9 @@
 // every GPU solution with the CPU light verifier (the same check the miner and the
 // node use). A healthy GPU passes 100%; a broken kernel shows up as failed solutions.
 //
-//   ppcheck [--device N] [--seconds S] [--difficulty D] HEIGHT...
+//   ppcheck [--device N] [--seconds S] [--difficulty D] [--safe L] HEIGHT...
+//
+// --safe L rebuilds each period's kernel in the miner's safe mode L after the first call.
 //
 // INIAKU_PP_BARRIER2=1 builds the OpenCL kernel with an extra barrier after the
 // shared-offset read (test for a local-memory race).
@@ -20,6 +22,7 @@ fn main() {
 	let mut seconds: u64 = 60;
 	let mut difficulty: u64 = 2_000_000;
 	let mut heights: Vec<u64> = Vec::new();
+	let mut safe: i32 = 0;
 	let args: Vec<String> = std::env::args().skip(1).collect();
 	let mut i = 0;
 	while i < args.len() {
@@ -27,6 +30,7 @@ fn main() {
 			"--device" => { i += 1; device = args[i].parse().unwrap(); }
 			"--seconds" => { i += 1; seconds = args[i].parse().unwrap(); }
 			"--difficulty" => { i += 1; difficulty = args[i].parse().unwrap(); }
+			"--safe" => { i += 1; safe = args[i].parse().unwrap(); }
 			h => heights.push(h.parse().expect("height")),
 		}
 		i += 1;
@@ -44,11 +48,12 @@ fn main() {
 	let boundary = U256::max_value() / U256::from(difficulty);
 	let target = (boundary >> 192).low_u64();
 	println!(
-		"device {} driver {} difficulty {} seconds/height {} barrier2 {}",
+		"device {} driver {} difficulty {} seconds/height {} safe {} barrier2 {}",
 		device,
 		driver,
 		difficulty,
 		seconds,
+		safe,
 		std::env::var("INIAKU_PP_BARRIER2").unwrap_or_default()
 	);
 
@@ -77,6 +82,13 @@ fn main() {
 			if first {
 				println!("height {} period {} first call {:.1}s (DAG + kernel build)", height, height / 50, t.elapsed().as_secs_f64());
 				first = false;
+				if safe > 0 {
+					gpu.set_safe_mode(safe);
+					let t = Instant::now();
+					gpu.compute_with_startnonce(header, height, epoch, target, next());
+					let _ = gpu.get_solutions();
+					println!("  safe mode {} rebuild {:.1}s", safe, t.elapsed().as_secs_f64());
+				}
 			}
 			if !gpu.ready() {
 				println!("height {}: GPU not ready", height);

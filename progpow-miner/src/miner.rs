@@ -24,6 +24,59 @@ const ALGORITHM_NAME: &str = "progpow";
 const GLOBAL_WORK_SIZE: u64 = 2048;
 const LOCAL_WORK_SIZE: u64 = 256;
 const WORK_PER_CALL: u64 = GLOBAL_WORK_SIZE * LOCAL_WORK_SIZE;
+const PROGPOW_PERIOD: u64 = 50;
+/// GPU solutions failing the CPU check (with none passing) before the kernel is rebuilt safer
+const BAD_SOLUTIONS_BEFORE_SAFE_MODE: u32 = 3;
+const MAX_SAFE_MODE: i32 = 2;
+
+/// Watches GPU solutions per ProgPoW period. Some drivers build a broken kernel for some
+/// periods: the GPU hashes at full speed but every solution fails the CPU check, so the
+/// rig finds nothing for hours. Then this period's kernel is rebuilt in a safe mode.
+struct PeriodGuard {
+	period: u64,
+	bad: u32,
+	good: u32,
+	level: i32,
+	gave_up: bool,
+}
+
+impl PeriodGuard {
+	fn new() -> Self {
+		PeriodGuard { period: u64::MAX, bad: 0, good: 0, level: 0, gave_up: false }
+	}
+
+	/// Returns the safe mode level to switch to, if any.
+	fn record(&mut self, instance: usize, height: u64, ok: bool) -> Option<i32> {
+		let period = height / PROGPOW_PERIOD;
+		if period != self.period {
+			// The miner builds the next period's kernel in normal mode again.
+			*self = PeriodGuard::new();
+			self.period = period;
+		}
+		if ok {
+			self.good += 1;
+			if self.level > 0 && self.good == 1 {
+				warn!(LOGGER, "ProgPoW GPU {}: safe mode {} works for period {}, solutions pass the check again", instance, self.level, period);
+			}
+			return None;
+		}
+		self.bad += 1;
+		if self.good > 0 || self.bad < BAD_SOLUTIONS_BEFORE_SAFE_MODE {
+			return None;
+		}
+		if self.level >= MAX_SAFE_MODE {
+			if !self.gave_up {
+				self.gave_up = true;
+				error!(LOGGER, "ProgPoW GPU {}: solutions still fail the check in safe mode for period {} (heights {}-{}); this GPU finds no shares until the next period", instance, period, period * PROGPOW_PERIOD, period * PROGPOW_PERIOD + PROGPOW_PERIOD - 1);
+			}
+			return None;
+		}
+		self.level += 1;
+		self.bad = 0;
+		warn!(LOGGER, "ProgPoW GPU {}: {} solutions in a row failed the CPU check for period {}: rebuilding the kernel in safe mode {}", instance, BAD_SOLUTIONS_BEFORE_SAFE_MODE, period, self.level);
+		Some(self.level)
+	}
+}
 
 fn timestamp() -> u64 {
 	let start = SystemTime::now();
@@ -73,6 +126,10 @@ impl PpMiner {
 		let mut cpu = PpCPU::new();
 		let mut gpu = PpGPU::new(config.device, config.driver);
 		gpu.init();
+		let mut guard = PeriodGuard::new();
+		// Testing only: treat this many GPU solutions per period as failed (exercises safe mode).
+		let force_bad: u32 = std::env::var("INIAKU_PP_FORCE_BAD").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+		let mut forced: (u64, u32) = (u64::MAX, 0);
 
 		loop {
 			if let Some(message) = solver_loop_rx.try_iter().next() {
@@ -142,7 +199,22 @@ impl PpMiner {
 					let digest: [u8; 32] = unsafe { ::std::mem::transmute(v) };
 					let h256_digest: U256 = digest.into();
 
-					if h256_digest <= boundary {
+					let mut ok = h256_digest <= boundary;
+					if force_bad > 0 {
+						let period = height / PROGPOW_PERIOD;
+						if forced.0 != period {
+							forced = (period, 0);
+						}
+						if ok && forced.1 < force_bad {
+							forced.1 += 1;
+							ok = false;
+						}
+					}
+					if let Some(level) = guard.record(instance, height, ok) {
+						gpu.set_safe_mode(level);
+					}
+
+					if ok {
 						s.solutions.push(Solution::new(
 							job_id as u64,
 							nonce,

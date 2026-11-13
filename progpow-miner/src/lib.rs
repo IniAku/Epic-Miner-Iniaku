@@ -1,6 +1,8 @@
 #[macro_use]
 extern crate lazy_static;
 extern crate bigint;
+#[macro_use]
+extern crate slog;
 extern crate keccak_hash;
 
 extern crate epic_miner_core as core;

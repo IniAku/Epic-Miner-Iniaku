@@ -76,6 +76,42 @@ impl PeriodGuard {
 		warn!(LOGGER, "ProgPoW GPU {}: {} solutions in a row failed the CPU check for period {}: rebuilding the kernel in safe mode {}", instance, BAD_SOLUTIONS_BEFORE_SAFE_MODE, period, self.level);
 		Some(self.level)
 	}
+
+	/// The period self-test already rebuilt this period's kernel in safe mode `level`.
+	fn set_level(&mut self, height: u64, level: i32) {
+		let period = height / PROGPOW_PERIOD;
+		if period != self.period {
+			*self = PeriodGuard::new();
+			self.period = period;
+		}
+		self.level = level;
+		self.bad = 0;
+	}
+}
+
+/// Easy difficulty for the self-test: a few GPU solutions per kernel call.
+const SELF_TEST_DIFFICULTY: u64 = 100_000;
+const SELF_TEST_CALLS: u32 = 4;
+
+/// Checks this period's kernel right away: hash at an easy target and compare the GPU result
+/// (value and mix) with the CPU. Returns Some(true) when it matches, Some(false) when the
+/// kernel is broken, None when no solution came back (not ready, or no answer).
+fn self_test(gpu: &PpGPU, cpu: &PpCPU, header: [u8; 32], height: u64) -> Option<bool> {
+	let boundary = U256::max_value() / U256::from(SELF_TEST_DIFFICULTY);
+	let target = (boundary >> 192).low_u64();
+	for _ in 0..SELF_TEST_CALLS {
+		gpu.compute_with_startnonce(header, height, (height / 30000) as i32, target, util::get_random_nonce());
+		if !gpu.ready() {
+			return None;
+		}
+		if let Some((nonce, mix)) = gpu.get_solutions() {
+			let (v, cpu_mix) = cpu.verify(&header, height, nonce).unwrap();
+			let digest: [u8; 32] = unsafe { ::std::mem::transmute(v) };
+			let gpu_mix: [u32; 8] = unsafe { ::std::mem::transmute(mix) };
+			return Some(U256::from(digest) <= boundary && gpu_mix == cpu_mix);
+		}
+	}
+	None
 }
 
 fn timestamp() -> u64 {
@@ -130,6 +166,9 @@ impl PpMiner {
 		// Testing only: treat this many GPU solutions per period as failed (exercises safe mode).
 		let force_bad: u32 = std::env::var("INIAKU_PP_FORCE_BAD").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
 		let mut forced: (u64, u32) = (u64::MAX, 0);
+		// Self-test each period's kernel against the CPU before mining it (INIAKU_PP_SELFTEST=0: off).
+		let self_test_on = std::env::var("INIAKU_PP_SELFTEST").map(|v| v != "0").unwrap_or(true);
+		let mut tested_period = u64::MAX;
 
 		loop {
 			if let Some(message) = solver_loop_rx.try_iter().next() {
@@ -164,6 +203,50 @@ impl PpMiner {
 			let mut header = [0u8; 32];
 
 			keccak_256(&header_pre, &mut header);
+
+			let period = height / PROGPOW_PERIOD;
+			if self_test_on && period != tested_period {
+				// A broken kernel (some drivers, some periods) is caught within seconds here
+				// instead of after several failed shares.
+				let mut level = 0;
+				let mut attempt = 0u32;
+				loop {
+					let mut result = self_test(&gpu, &cpu, header, height);
+					if result == Some(true) && attempt < force_bad {
+						result = Some(false); // testing only (INIAKU_PP_FORCE_BAD)
+					}
+					attempt += 1;
+					match result {
+						Some(true) => {
+							tested_period = period;
+							if level > 0 {
+								warn!(LOGGER, "ProgPoW GPU {}: period {} self-test passes in safe mode {}", instance, period, level);
+							} else {
+								info!(LOGGER, "ProgPoW GPU {}: period {} self-test OK", instance, period);
+							}
+							break;
+						}
+						Some(false) if level < MAX_SAFE_MODE => {
+							level += 1;
+							warn!(LOGGER, "ProgPoW GPU {}: period {} self-test failed (GPU result differs from the CPU): rebuilding the kernel in safe mode {}", instance, period, level);
+							gpu.set_safe_mode(level);
+							guard.set_level(height, level);
+						}
+						Some(false) => {
+							tested_period = period;
+							error!(LOGGER, "ProgPoW GPU {}: period {} self-test still fails in safe mode {}; this GPU likely finds no shares until the next period", instance, period, level);
+							break;
+						}
+						None => {
+							// GPU not ready (DAG) or no answer: try again on the next round.
+							if gpu.ready() {
+								tested_period = period;
+							}
+							break;
+						}
+					}
+				}
+			}
 
 			let start = timestamp();
 			gpu.compute_with_startnonce(header, height, (height / 30000) as i32, target, util::get_random_nonce());

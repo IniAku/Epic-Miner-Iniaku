@@ -761,7 +761,7 @@ index 0fbd12d..8667022 100644
      void progpow_gpu_configure(uint32_t devicesCount);
      void progpow_gpu_compute(void* miner, const void* header, uint64_t height, int epoch, uint64_t boundary, uint64_t startNonce);
 diff --git a/pp_full/lib/libprogpow/ProgPow.cpp b/pp_full/lib/libprogpow/ProgPow.cpp
-index 23066b8..969a587 100644
+index 23066b8..9c85d4e 100644
 --- a/pp_full/lib/libprogpow/ProgPow.cpp
 +++ b/pp_full/lib/libprogpow/ProgPow.cpp
 @@ -1,6 +1,7 @@
@@ -781,7 +781,21 @@ index 23066b8..969a587 100644
  {
      std::stringstream ret;
  
-@@ -99,10 +100,21 @@ std::string ProgPow::getKern(uint64_t block_number, kernel_t kern)
+@@ -71,8 +72,11 @@ std::string ProgPow::getKern(uint64_t block_number, kernel_t kern)
+         ret << "\n";
+         ret << "typedef unsigned int       uint32_t;\n";
+         ret << "typedef unsigned long      uint64_t;\n";
+-        ret << "#define ROTL32(x, n) rotate((x), (uint32_t)(n))\n";
+-        ret << "#define ROTR32(x, n) rotate((x), (uint32_t)(32-n))\n";
++        // iniaku: rotate counts masked to 0..31. The random math feeds full 32-bit register
++        // values as counts (and 32-n wraps); OpenCL defines rotate() modulo 32, but some AMD
++        // compilers get large/wrapped counts wrong for some periods. Same result everywhere else.
++        ret << "#define ROTL32(x, n) rotate((x), (uint32_t)((n) & 31u))\n";
++        ret << "#define ROTR32(x, n) rotate((x), (uint32_t)((32u - ((n) & 31u)) & 31u))\n";
+         ret << "\n";
+ 	}
+ 
+@@ -99,10 +103,21 @@ std::string ProgPow::getKern(uint64_t block_number, kernel_t kern)
  	{
          ret << "typedef struct __attribute__ ((aligned (PROGPOW_DAG_LOADS * 4))) {uint32_t s[PROGPOW_DAG_LOADS];} dag_t;\n";
          ret << "\n";
@@ -804,7 +818,7 @@ index 23066b8..969a587 100644
          ret << "        __local const uint32_t *c_dag,\n";
          ret << "        __local uint64_t *share,\n";
          ret << "        const bool hack_false)\n";
-@@ -132,10 +144,17 @@ std::string ProgPow::getKern(uint64_t block_number, kernel_t kern)
+@@ -132,10 +147,17 @@ std::string ProgPow::getKern(uint64_t block_number, kernel_t kern)
  		ret << "    share[group_id] = mix[0];\n";
  		ret << "barrier(CLK_LOCAL_MEM_FENCE);\n";
  		ret << "offset = share[group_id];\n";

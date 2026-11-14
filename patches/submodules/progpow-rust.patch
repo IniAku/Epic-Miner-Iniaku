@@ -71,7 +71,7 @@ index 6b8ce2c..22c65cf 100644
  configureProject()
  
 diff --git a/pp_full/lib/libethash-cl/CLMiner.cpp b/pp_full/lib/libethash-cl/CLMiner.cpp
-index cc46da4..2f14910 100644
+index cc46da4..fd9dbf4 100644
 --- a/pp_full/lib/libethash-cl/CLMiner.cpp
 +++ b/pp_full/lib/libethash-cl/CLMiner.cpp
 @@ -8,10 +8,12 @@
@@ -175,8 +175,8 @@ index cc46da4..2f14910 100644
  CLMiner::CLMiner(unsigned _index): current(0,0,-1,0) {
  	index = _index;
 +	++s_created;
-+}
-+
+ }
+ 
 +// Frees everything that holds GPU memory. Never throws: it also runs after a failure.
 +void CLMiner::releaseResources()
 +{
@@ -217,8 +217,8 @@ index cc46da4..2f14910 100644
 +		std::_Exit(1);
 +	}
 +	std::cerr << "ProgPoW: other GPUs keep mining, GPU " << index << " retries in 5 minutes" << std::endl;
- }
- 
++}
++
 +void CLMiner::deviceRecovered()
 +{
 +	m_ready = true;
@@ -277,16 +277,22 @@ index cc46da4..2f14910 100644
  		}
  
  		current.height = height;
-@@ -297,7 +444,7 @@ void CLMiner::compute(const void* header, uint64_t height, int epoch, uint64_t t
+@@ -297,7 +444,13 @@ void CLMiner::compute(const void* header, uint64_t height, int epoch, uint64_t t
  		m_searchKernel.setArg(0, m_searchBuffer);
  
  		//set difficulty to kernel
 -		m_searchKernel.setArg(4, target);
 +		m_searchKernel.setArg(7, target);
++	}
++	else if (current.target != target) {
++		// iniaku: a new share target on the same height (pool vardiff, or the period self-test's
++		// easy target) must reach the kernel too; before, it only changed with the height.
++		current.target = target;
++		m_searchKernel.setArg(7, target);
  	}
  
  	if (current.header != nullptr) {
-@@ -310,7 +457,7 @@ void CLMiner::compute(const void* header, uint64_t height, int epoch, uint64_t t
+@@ -310,7 +463,7 @@ void CLMiner::compute(const void* header, uint64_t height, int epoch, uint64_t t
  	m_queue.enqueueWriteBuffer(m_header, CL_FALSE, 0, current.header->size, current.header->data());
  
  	// set start nonce
@@ -295,7 +301,7 @@ index cc46da4..2f14910 100644
  
  	// run search kernel
  	m_queue.enqueueNDRangeKernel(m_searchKernel, cl::NullRange, m_globalWorkSize, m_workgroupSize);
-@@ -318,21 +465,38 @@ void CLMiner::compute(const void* header, uint64_t height, int epoch, uint64_t t
+@@ -318,21 +471,38 @@ void CLMiner::compute(const void* header, uint64_t height, int epoch, uint64_t t
  	m_queue.finish();
  }
  
@@ -341,7 +347,7 @@ index cc46da4..2f14910 100644
  	}
  
  	return false;
-@@ -363,8 +527,6 @@ bool CLMiner::configureGPU(
+@@ -363,8 +533,6 @@ bool CLMiner::configureGPU(
  	bool _exit
  )
  {
@@ -350,7 +356,7 @@ index cc46da4..2f14910 100644
  	_localWorkSize = ((_localWorkSize + 7) / 8) * 8;
  	s_workgroupSize = _localWorkSize;
  	s_initialGlobalWorkSize = _globalWorkSizeMultiplier * _localWorkSize;
-@@ -375,10 +537,18 @@ bool CLMiner::configureGPU(
+@@ -375,10 +543,18 @@ bool CLMiner::configureGPU(
  	vector<cl::Platform> platforms = getPlatforms();
  	if (platforms.empty())
  		return false;
@@ -371,7 +377,7 @@ index cc46da4..2f14910 100644
  	for (auto const& device: devices)
  	{
  		cl_ulong result = 0;
-@@ -403,6 +573,9 @@ bool CLMiner::configureGPU(
+@@ -403,6 +579,9 @@ bool CLMiner::configureGPU(
  
  bool CLMiner::init(int epoch, uint64_t block_number)
  {
@@ -381,7 +387,7 @@ index cc46da4..2f14910 100644
  	EthashAux::LightType light = EthashAux::light(epoch);
  
  	// get all platforms
-@@ -452,9 +625,13 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+@@ -452,9 +631,13 @@ bool CLMiner::init(int epoch, uint64_t block_number)
  			return false;
  		}
  
@@ -396,7 +402,7 @@ index cc46da4..2f14910 100644
  		//m_hwmoninfo.deviceIndex = deviceId % devices.size();
  		cl::Device& device = devices[deviceId % devices.size()];
  		string device_version = device.getInfo<CL_DEVICE_VERSION>();
-@@ -488,6 +665,21 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+@@ -488,6 +671,21 @@ bool CLMiner::init(int epoch, uint64_t block_number)
  		} else {
  			sprintf(options, "%s", "");
  		}
@@ -418,7 +424,7 @@ index cc46da4..2f14910 100644
  
  		// create context
  		m_context = cl::Context(vector<cl::Device>(&device, &device + 1));
-@@ -501,13 +693,43 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+@@ -501,13 +699,43 @@ bool CLMiner::init(int epoch, uint64_t block_number)
  
  		uint64_t dagBytes = ethash_get_datasize(light->light->block_number);
  		uint32_t dagElms = (unsigned)(dagBytes / (PROGPOW_LANES * PROGPOW_DAG_LOADS * 4));
@@ -463,7 +469,7 @@ index cc46da4..2f14910 100644
  		code += string(CLMiner_kernel, sizeof(CLMiner_kernel));
  
  		addDefinition(code, "GROUP_SIZE", m_workgroupSize);
-@@ -517,6 +739,8 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+@@ -517,6 +745,8 @@ bool CLMiner::init(int epoch, uint64_t block_number)
  		addDefinition(code, "MAX_OUTPUTS", c_maxSearchResults);
  		addDefinition(code, "PLATFORM", platformId);
  		addDefinition(code, "COMPUTE", computeCapability);
@@ -472,7 +478,7 @@ index cc46da4..2f14910 100644
  
          /*ofstream out;
          out.open("kernel.cl");
-@@ -555,7 +779,11 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+@@ -555,7 +785,11 @@ bool CLMiner::init(int epoch, uint64_t block_number)
  			//cllog << "Creating light cache buffer, size" << light->data().size();
  			m_light = cl::Buffer(m_context, CL_MEM_READ_ONLY, light->data().size());
  			//cllog << "Creating DAG buffer, size" << dagBytes;
@@ -485,7 +491,7 @@ index cc46da4..2f14910 100644
  			//cllog << "Loading kernels";
  			m_searchKernel = cl::Kernel(program, "ethash_search");
  			m_dagKernel = cl::Kernel(program, "ethash_calculate_dag_item");
-@@ -572,8 +800,10 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+@@ -572,8 +806,10 @@ bool CLMiner::init(int epoch, uint64_t block_number)
  		m_header = cl::Buffer(m_context, CL_MEM_READ_ONLY, 32);
  
  		m_searchKernel.setArg(1, m_header);
@@ -498,7 +504,7 @@ index cc46da4..2f14910 100644
  
  		// create mining buffers
  		//ETHCL_LOG("Creating mining buffer");
-@@ -585,15 +815,23 @@ bool CLMiner::init(int epoch, uint64_t block_number)
+@@ -585,15 +821,23 @@ bool CLMiner::init(int epoch, uint64_t block_number)
  		if (restWork > 0) fullRuns++;
  
  		m_dagKernel.setArg(1, m_light);

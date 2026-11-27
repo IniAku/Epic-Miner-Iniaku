@@ -1,5 +1,5 @@
 diff --git a/pp_full/build.rs b/pp_full/build.rs
-index 3dd42b1..288df61 100644
+index 3dd42b1..f12fbf5 100644
 --- a/pp_full/build.rs
 +++ b/pp_full/build.rs
 @@ -47,7 +47,44 @@ fn compile_cmake() {
@@ -48,6 +48,25 @@ index 3dd42b1..288df61 100644
  }
  
  fn exec_if_newer<F: Fn()>(inpath: &str, outpath: &str, build: F) {
+@@ -91,10 +128,17 @@ fn main() {
+ 
+ 		if cfg!(feature = "cuda") {
+ 			println!(
+-				"cargo:rustc-link-search={}/build/libethash-cl/{}",
++				"cargo:rustc-link-search={}/build/libethash-cuda/{}",
+ 				out_dir, target
+ 			);
+ 			println!("cargo:rustc-link-lib=ethash-cuda");
++			// CUDA toolkit libs (found through LIB / CUDA_PATH): driver API, NVRTC, static runtime.
++			if let Ok(cuda) = env::var("CUDA_PATH") {
++				println!("cargo:rustc-link-search={}\\lib\\x64", cuda);
++			}
++			println!("cargo:rustc-link-lib=cuda");
++			println!("cargo:rustc-link-lib=nvrtc");
++			println!("cargo:rustc-link-lib=cudart_static");
+ 		}
+ 
+ 		println!(
 diff --git a/pp_full/lib/CMakeLists.txt b/pp_full/lib/CMakeLists.txt
 index 6b8ce2c..22c65cf 100644
 --- a/pp_full/lib/CMakeLists.txt
@@ -742,10 +761,10 @@ index 5774dc5..3dca04e 100644
 +    virtual void set_safe_mode(int level) {}
  };
 diff --git a/pp_full/lib/libexternal/CMakeLists.txt b/pp_full/lib/libexternal/CMakeLists.txt
-index 76b5c73..dcf0ccc 100644
+index 76b5c73..c988528 100644
 --- a/pp_full/lib/libexternal/CMakeLists.txt
 +++ b/pp_full/lib/libexternal/CMakeLists.txt
-@@ -12,6 +12,9 @@ target_link_libraries(ppow ethcore ethash progpow)
+@@ -12,7 +12,13 @@ target_link_libraries(ppow ethcore ethash progpow)
  
  if(ETHASHCL)
  	target_link_libraries(ppow ethash-cl)
@@ -755,6 +774,10 @@ index 76b5c73..dcf0ccc 100644
  endif()
  if(ETHASHCUDA)
  	target_link_libraries(ppow ethash-cuda)
++	# progpow.cpp includes CUDAMiner.h -> cuda.h (not in a system path on Windows)
++	find_package(CUDA REQUIRED)
++	target_include_directories(ppow PRIVATE ${CUDA_INCLUDE_DIRS})
+ endif()
 diff --git a/pp_full/lib/libexternal/progpow.cpp b/pp_full/lib/libexternal/progpow.cpp
 index a30d60d..11625ce 100644
 --- a/pp_full/lib/libexternal/progpow.cpp

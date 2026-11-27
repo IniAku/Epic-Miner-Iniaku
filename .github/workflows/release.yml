@@ -173,7 +173,10 @@ jobs:
       - name: Build
         shell: bash
         run: |
-          export RUSTFLAGS="-L native=$OCL_LIB_DIR -L native=$CUDA_PATH/lib/x64 -C target-feature=+crt-static"
+          export RUSTFLAGS="-L native=$OCL_LIB_DIR -C target-feature=+crt-static"
+          # CUDA_PATH has spaces ("C:\Program Files\NVIDIA GPU Computing Toolkit\..."): RUSTFLAGS would
+          # split it, so cuda.lib / nvrtc.lib are found through the MSVC linker's LIB search path instead.
+          export LIB="$(cygpath -w "$CUDA_PATH/lib/x64");${LIB:-}"
           export INIAKU_VERSION="${{ steps.v.outputs.version }}"
           export CARGO_TARGET_DIR="$PWD/target-cuda"
           build() {

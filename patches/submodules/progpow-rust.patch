@@ -713,7 +713,7 @@ index 4d4b129..02911d3 100644
  endif()
  
 diff --git a/pp_full/lib/libethash-cuda/CUDAMiner.cpp b/pp_full/lib/libethash-cuda/CUDAMiner.cpp
-index 4144339..cd18977 100644
+index 4144339..6071f33 100644
 --- a/pp_full/lib/libethash-cuda/CUDAMiner.cpp
 +++ b/pp_full/lib/libethash-cuda/CUDAMiner.cpp
 @@ -27,7 +27,7 @@ using namespace std;
@@ -725,6 +725,54 @@ index 4144339..cd18977 100644
  
  unsigned CUDAMiner::s_numInstances = 0;
  
+@@ -137,6 +137,7 @@ void CUDAMiner::compute(const void* header, uint64_t height, int epoch, uint64_t
+ 			current.epoch = epoch;
+ 		}
+ 
++		delete current.header; // one per job (leaked before)
+ 		current.header = new h256 { (const uint8_t*)header, h256::ConstructFromPointer };
+ 
+ 		search(current.header->data(), target, false, startNonce);
+@@ -159,7 +160,7 @@ bool CUDAMiner::get_solutions(void* data) {
+ 	if (solution != nullptr){
+ 		memcpy((uint8_t*)data, &solution->nonce, sizeof(uint64_t));
+ 		memcpy(((uint8_t*)data) + sizeof(uint64_t), (const void*)solution->mixHash.data(), sizeof(uint32_t) * 8);
+-		free(solution);
++		delete solution; // allocated with new (was free())
+ 		solution = nullptr;
+ 		return true;
+ 	}
+@@ -371,8 +372,13 @@ bool CUDAMiner::cuda_init(
+ 
+ 		//cudalog << "Using device: " << device_props.name << " (Compute " + to_string(device_props.major) + "." + to_string(device_props.minor) + ")";
+ 
+-		m_search_buf = new volatile search_results *[s_numStreams];
+-		m_streams = new cudaStream_t[s_numStreams];
++		// 2026-11-27: allocate the arrays once. They used to be re-created (uninitialized) on every
++		// init() while the pinned buffers/streams below are only filled when the DAG is rebuilt, so
++		// a second init() with the same DAG left search() with garbage pointers (access violation).
++		if (!m_search_buf) {
++			m_search_buf = new volatile search_results *[s_numStreams]();
++			m_streams = new cudaStream_t[s_numStreams]();
++		}
+ 
+ 		uint64_t dagBytes = ethash_get_datasize(_light->block_number);
+ 		uint32_t dagElms   = (unsigned)(dagBytes / (PROGPOW_LANES * PROGPOW_DAG_LOADS * 4));
+diff --git a/pp_full/lib/libethash-cuda/CUDAMiner.h b/pp_full/lib/libethash-cuda/CUDAMiner.h
+index 1aed2f9..a47c0ef 100644
+--- a/pp_full/lib/libethash-cuda/CUDAMiner.h
++++ b/pp_full/lib/libethash-cuda/CUDAMiner.h
+@@ -154,8 +154,8 @@ private:
+ 
+ 	CUmodule m_module;
+ 	CUfunction m_kernel;
+-	volatile search_results** m_search_buf;
+-	cudaStream_t  * m_streams;
++	volatile search_results** m_search_buf = nullptr;
++	cudaStream_t  * m_streams = nullptr;
+ 
+ 	/// The local work size for the search
+ 	static unsigned s_blockSize;
 diff --git a/pp_full/lib/libethash/compiler.h b/pp_full/lib/libethash/compiler.h
 index 9695871..80b4c82 100644
 --- a/pp_full/lib/libethash/compiler.h

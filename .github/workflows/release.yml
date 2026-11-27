@@ -5,7 +5,7 @@ name: release
 
 on:
   push:
-    branches: [master]
+    branches: [master, progpow-cuda]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
@@ -119,6 +119,80 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: windows
+          path: |
+            dist/*.zip
+            dist/*.sha256
+
+  # ProgPoW on NVIDIA through CUDA (2026-11-27): same as the windows job plus the CUDA toolkit;
+  # epic-miner built with the cuda feature (ProgPoW CUDA, kernel compiled at run time by NVRTC).
+  windows-cuda:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Submodule patches
+        shell: bash
+        run: iniaku/apply-submodule-patches.sh
+      - name: Boost (vcpkg)
+        shell: pwsh
+        run: |
+          $ok = $false
+          for ($i = 1; $i -le 10 -and -not $ok; $i++) {
+            & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install boost-system:x64-windows-static boost-algorithm:x64-windows-static boost-exception:x64-windows-static boost-functional:x64-windows-static boost-multiprecision:x64-windows-static boost-throw-exception:x64-windows-static
+            if ($LASTEXITCODE -eq 0) { $ok = $true } elseif ($i -lt 10) { Write-Host "vcpkg attempt $i failed, retrying in 60 s"; Start-Sleep -Seconds 60 }
+          }
+          if (-not $ok) { exit 1 }
+          $root = $env:VCPKG_INSTALLATION_ROOT -replace '\\','/'
+          "CMAKE_TOOLCHAIN_FILE=$root/scripts/buildsystems/vcpkg.cmake" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VCPKG_TARGET_TRIPLET=x64-windows-static" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "LIBCLANG_PATH=C:/Program Files/LLVM/bin" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "PROGPOW_CMAKE_GENERATOR=Visual Studio 17 2022" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: CUDA toolkit
+        uses: Jimver/cuda-toolkit@v0.2.19
+        with:
+          cuda: "12.4.1"
+          method: network
+          sub-packages: '["nvcc", "cudart", "nvrtc", "nvrtc_dev", "visual_studio_integration"]'
+      - name: Version
+        id: v
+        shell: bash
+        run: echo "version=$(iniaku/version.sh)" >> "$GITHUB_OUTPUT"
+      - name: OpenCL SDK (OpenCL.lib, for the Cuckoo OpenCL plugin)
+        shell: pwsh
+        run: |
+          $url = "https://github.com/KhronosGroup/OpenCL-SDK/releases/download/v2023.12.14/OpenCL-SDK-v2023.12.14-Win-x64.zip"
+          Invoke-WebRequest $url -OutFile ocl.zip
+          Expand-Archive ocl.zip -DestinationPath C:\ocl
+          $lib = (Get-ChildItem C:\ocl -Recurse -Filter OpenCL.lib | Select-Object -First 1).DirectoryName
+          "OCL_LIB_DIR=$lib" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $inc = (Get-ChildItem C:\ocl -Recurse -Filter cl.h | Where-Object { $_.Directory.Name -eq 'CL' } | Select-Object -First 1).Directory.Parent.FullName
+          "OpenCL_INCLUDE_DIR=$($inc -replace '\\','/')" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "OpenCL_LIBRARY=$((Join-Path $lib 'OpenCL.lib') -replace '\\','/')" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        shell: bash
+        run: |
+          export RUSTFLAGS="-L native=$OCL_LIB_DIR -L native=$CUDA_PATH/lib/x64 -C target-feature=+crt-static"
+          export INIAKU_VERSION="${{ steps.v.outputs.version }}"
+          export CARGO_TARGET_DIR="$PWD/target-cuda"
+          build() {
+            if ! "$@" > build.log 2>&1; then
+              cat build.log
+              msg=$( (grep -niE "error|fatal|LINK" build.log | grep -vi "warning" | head -30; echo ----; tail -30 build.log) | sed 's/\x1b\[[0-9;]*m//g' | tr -d '\r' | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+              echo "::error title=build failed::$msg"
+              exit 1
+            fi
+            cat build.log
+          }
+          build cargo build --release --no-default-features --features cuda,cuckoo_miner_cuda/no-plugin-build
+          build cargo build --release -p ocl_cuckatoo
+      - name: Package
+        shell: bash
+        run: EPIC_TARGET_DIR="$PWD/target-cuda" iniaku/package-windows.sh "${{ steps.v.outputs.version }}" cuda
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-cuda
           path: |
             dist/*.zip
             dist/*.sha256

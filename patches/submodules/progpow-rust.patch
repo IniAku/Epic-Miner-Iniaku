@@ -706,6 +706,25 @@ index 4144339..cd18977 100644
  
  unsigned CUDAMiner::s_numInstances = 0;
  
+diff --git a/pp_full/lib/libethash/compiler.h b/pp_full/lib/libethash/compiler.h
+index 9695871..80b4c82 100644
+--- a/pp_full/lib/libethash/compiler.h
++++ b/pp_full/lib/libethash/compiler.h
+@@ -24,10 +24,10 @@
+ #define inline __inline
+ #endif
+ 
+-// pretend restrict is a standard keyword
+-#if defined(_MSC_VER)
+-#define restrict __restrict
+-#else
++// pretend restrict is a standard keyword. Not on MSVC (2026-11-27): newer UCRT headers use
++// __declspec(restrict), which this macro turned into __declspec(__restrict) (C2485 in the CUDA build).
++// Nothing in this tree uses the restrict keyword.
++#if !defined(_MSC_VER)
+ #define restrict __restrict__
+ #endif
+ 
 diff --git a/pp_full/lib/libethcore/miner.h b/pp_full/lib/libethcore/miner.h
 index 5774dc5..3dca04e 100644
 --- a/pp_full/lib/libethcore/miner.h

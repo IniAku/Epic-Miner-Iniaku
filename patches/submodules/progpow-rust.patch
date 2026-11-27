@@ -655,6 +655,44 @@ index a0da68d..1000767 100644
  	hunter_add_package(OpenCL)
  	find_package(OpenCL CONFIG REQUIRED)
  else()
+diff --git a/pp_full/lib/libethash-cuda/CMakeLists.txt b/pp_full/lib/libethash-cuda/CMakeLists.txt
+index 4d4b129..02911d3 100644
+--- a/pp_full/lib/libethash-cuda/CMakeLists.txt
++++ b/pp_full/lib/libethash-cuda/CMakeLists.txt
+@@ -2,9 +2,9 @@
+ # The normal build depends on it properly and if the kernel file is changed, then
+ # a rebuild of libethash-cuda should be triggered
+ 
+-set(CMAKE_C_COMPILER /usr/bin/gcc-7)
+-set(CMAKE_CXX_COMPILER /usr/bin/g++-7)
+-set(CUDA_ARCH 35;37;53;60;61;62;70;75)
++# set(CMAKE_C_COMPILER /usr/bin/gcc-7)  # 2026-11-27: gcc-7 is not installed; use the default host compiler
++# set(CMAKE_CXX_COMPILER /usr/bin/g++-7)  # 2026-11-27: use the default host compiler
++set(CUDA_ARCH 50;52;60;61;70;75;80;86;89;90)
+ 
+ add_custom_command(
+ 	OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/CUDAMiner_kernel.h
+@@ -35,14 +35,16 @@ else()
+ 	set(
+ 		CUDA_NVCC_FLAGS
+ 		${CUDA_NVCC_FLAGS}
+-		"-gencode arch=compute_35,code=sm_35"
+-		"-gencode arch=compute_37,code=sm_37"
+-		"-gencode arch=compute_53,code=sm_53"
++		"-gencode arch=compute_50,code=sm_50"
++		"-gencode arch=compute_52,code=sm_52"
+ 		"-gencode arch=compute_60,code=sm_60"
+ 		"-gencode arch=compute_61,code=sm_61"
+-		"-gencode arch=compute_62,code=sm_62"
+ 		"-gencode arch=compute_70,code=sm_70"
+ 		"-gencode arch=compute_75,code=sm_75"
++		"-gencode arch=compute_80,code=sm_80"
++		"-gencode arch=compute_86,code=sm_86"
++		"-gencode arch=compute_89,code=sm_89"
++		"-gencode arch=compute_90,code=compute_90"
+ 	)
+ endif()
+ 
 diff --git a/pp_full/lib/libethash-cuda/CUDAMiner.cpp b/pp_full/lib/libethash-cuda/CUDAMiner.cpp
 index 4144339..cd18977 100644
 --- a/pp_full/lib/libethash-cuda/CUDAMiner.cpp

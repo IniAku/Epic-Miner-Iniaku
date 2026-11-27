@@ -6,9 +6,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libssl-dev libncursesw5-dev ocl-icd-opencl-dev opencl-headers clang libclang-dev wget gnupg \
  && rm -rf /var/lib/apt/lists/*
 # CUDA 12.4 (repo NVIDIA ubuntu2004); runtime ter-link statis di plugin, user cukup driver.
+# nvrtc + driver stub (libcuda.so): ProgPoW CUDA compiles its kernel at run time (2026-11-27).
 RUN wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.1-1_all.deb \
  && dpkg -i cuda-keyring_1.1-1_all.deb && rm cuda-keyring_1.1-1_all.deb \
  && apt-get update && apt-get install -y --no-install-recommends cuda-nvcc-12-4 cuda-cudart-dev-12-4 \
+      cuda-nvrtc-dev-12-4 cuda-driver-dev-12-4 \
+ && ln -s /usr/local/cuda-12.4/lib64/stubs/libcuda.so /usr/local/cuda-12.4/lib64/libcuda.so \
  && rm -rf /var/lib/apt/lists/*
 ENV RUSTUP_HOME=/opt/rustup CARGO_HOME=/opt/cargo
 ENV PATH=/usr/local/cuda-12.4/bin:/opt/cargo/bin:$PATH

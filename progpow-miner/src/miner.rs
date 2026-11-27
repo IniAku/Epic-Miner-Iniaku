@@ -169,6 +169,9 @@ impl PpMiner {
 		// Self-test each period's kernel against the CPU before mining it (INIAKU_PP_SELFTEST=0: off).
 		let self_test_on = std::env::var("INIAKU_PP_SELFTEST").map(|v| v != "0").unwrap_or(true);
 		let mut tested_period = u64::MAX;
+		// Last solutions sent (height, nonce): never submit the same one twice (2026-11-27, pool 1.4.25
+		// rejects duplicates; a backend that re-finds a share must not show up as rejects).
+		let mut sent: std::collections::VecDeque<(u64, u64)> = std::collections::VecDeque::with_capacity(256);
 
 		loop {
 			if let Some(message) = solver_loop_rx.try_iter().next() {
@@ -297,6 +300,14 @@ impl PpMiner {
 						gpu.set_safe_mode(level);
 					}
 
+					if ok && sent.contains(&(height, nonce)) {
+						ok = false;
+					} else if ok {
+						if sent.len() >= 256 {
+							sent.pop_front();
+						}
+						sent.push_back((height, nonce));
+					}
 					if ok {
 						s.solutions.push(Solution::new(
 							job_id as u64,

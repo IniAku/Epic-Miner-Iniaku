@@ -713,7 +713,7 @@ index 4d4b129..02911d3 100644
  endif()
  
 diff --git a/pp_full/lib/libethash-cuda/CUDAMiner.cpp b/pp_full/lib/libethash-cuda/CUDAMiner.cpp
-index 4144339..6071f33 100644
+index 4144339..4a6c820 100644
 --- a/pp_full/lib/libethash-cuda/CUDAMiner.cpp
 +++ b/pp_full/lib/libethash-cuda/CUDAMiner.cpp
 @@ -27,7 +27,7 @@ using namespace std;
@@ -758,6 +758,17 @@ index 4144339..6071f33 100644
  
  		uint64_t dagBytes = ethash_get_datasize(_light->block_number);
  		uint32_t dagElms   = (unsigned)(dagBytes / (PROGPOW_LANES * PROGPOW_DAG_LOADS * 4));
+@@ -586,7 +592,9 @@ void CUDAMiner::search(
+ 	bool initialize = false;
+ 	if (memcmp(&m_current_header, header, sizeof(hash32_t)))
+ 	{
+-		m_current_header = *reinterpret_cast<hash32_t const *>(header);
++		// memcpy, not a hash32_t load: hash32_t holds CUDA uint4 (16-byte aligned), so MSVC copies it with
++		// movaps, which faults when the header buffer is not 16-byte aligned (crash on Windows, 2026-11-27).
++		memcpy(&m_current_header, header, sizeof(hash32_t));
+ 		initialize = true;
+ 	}
+ 	if (m_current_target != target)
 diff --git a/pp_full/lib/libethash-cuda/CUDAMiner.h b/pp_full/lib/libethash-cuda/CUDAMiner.h
 index 1aed2f9..a47c0ef 100644
 --- a/pp_full/lib/libethash-cuda/CUDAMiner.h

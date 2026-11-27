@@ -173,7 +173,8 @@ jobs:
       - name: Build
         shell: bash
         run: |
-          export RUSTFLAGS="-L native=$OCL_LIB_DIR -C target-feature=+crt-static"
+          # /MAP: linker map with every public symbol's address, to resolve crash offsets (CUDA debugging)
+          export RUSTFLAGS="-L native=$OCL_LIB_DIR -C target-feature=+crt-static -C link-arg=/MAP"
           # CUDA_PATH has spaces ("C:\Program Files\NVIDIA GPU Computing Toolkit\..."): RUSTFLAGS would
           # split it, so cuda.lib / nvrtc.lib are found through the MSVC linker's LIB search path instead.
           export LIB="$(cygpath -w "$CUDA_PATH/lib/x64");${LIB:-}"
@@ -199,6 +200,10 @@ jobs:
           path: |
             dist/*.zip
             dist/*.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-cuda-map
+          path: target-cuda/release/deps/epic_miner*.map
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')

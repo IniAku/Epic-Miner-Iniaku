@@ -5,7 +5,7 @@ name: release
 
 on:
   push:
-    branches: [master, progpow-cuda]
+    branches: [master]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
@@ -207,13 +207,15 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [linux, windows]
+    needs: [linux, windows, windows-cuda]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+      - name: Keep only packages (no linker maps)
+        run: find dist -name '*.map' -delete; find dist -mindepth 2 -type f -exec mv -t dist {} +; ls -la dist
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
@@ -225,6 +227,7 @@ jobs:
 
             - Linux OpenCL (AMD, also NVIDIA) and Linux CUDA (NVIDIA): glibc 2.31+ (HiveOS, Ubuntu 20.04+)
             - Windows OpenCL (AMD and NVIDIA)
+            - Windows CUDA (NVIDIA): ProgPoW on CUDA, kernel compiled at start by the NVRTC DLLs in the package
 
             Set your address in epic-miner.toml: stratum_server_login = "<address>.<worker>"
             See README.txt in the package.
